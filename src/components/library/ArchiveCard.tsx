@@ -8,6 +8,7 @@ interface ArchiveCardProps {
   archive: ArchiveSummary;
   libraryPath: string;
   onDoubleClick?: (id: string) => void;
+  onContextMenu?: (e: React.MouseEvent, archiveId: string) => void;
 }
 
 /**
@@ -15,7 +16,7 @@ interface ArchiveCardProps {
  * Uses <img> tag (not backgroundImage). Shows title and rank stars.
  * Selection border, tabIndex={0} and aria-label for accessibility.
  */
-export default function ArchiveCard({ archive, libraryPath, onDoubleClick }: ArchiveCardProps) {
+export default function ArchiveCard({ archive, libraryPath, onDoubleClick, onContextMenu }: ArchiveCardProps) {
   const selectedArchiveIds = useLibraryStore((s) => s.selectedArchiveIds);
   const selectArchive = useLibraryStore((s) => s.selectArchive);
 
@@ -53,14 +54,36 @@ export default function ArchiveCard({ archive, libraryPath, onDoubleClick }: Arc
     if (onDoubleClick) onDoubleClick(archive.id);
   }, [archive.id, onDoubleClick]);
 
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      if (onContextMenu) onContextMenu(e, archive.id);
+    },
+    [archive.id, onContextMenu],
+  );
+
+  const handleDragStart = useCallback(
+    (e: React.DragEvent) => {
+      const ids = selectedArchiveIds.has(archive.id)
+        ? Array.from(selectedArchiveIds)
+        : [archive.id];
+      e.dataTransfer.setData('application/x-archive-ids', JSON.stringify(ids));
+      e.dataTransfer.effectAllowed = 'move';
+    },
+    [archive.id, selectedArchiveIds],
+  );
+
   return (
     <div
       tabIndex={0}
       role="button"
       aria-label={`${archive.title} - ${archive.rank}星`}
+      draggable
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onKeyDown={handleKeyDown}
+      onDragStart={handleDragStart}
+      onContextMenu={handleContextMenu}
       style={{
         background: 'var(--bg-card)',
         borderRadius: 6,
