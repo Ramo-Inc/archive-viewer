@@ -360,6 +360,28 @@ pub fn get_smart_folders(conn: &Connection) -> Result<Vec<SmartFolder>, AppError
     Ok(results)
 }
 
+pub fn get_smart_folder_by_id(conn: &Connection, id: &str) -> Result<SmartFolder, AppError> {
+    conn.query_row(
+        "SELECT id, name, conditions, sort_order, created_at FROM smart_folders WHERE id = ?1",
+        params![id],
+        |row| {
+            Ok(SmartFolder {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                conditions: row.get(2)?,
+                sort_order: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        },
+    )
+    .map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => {
+            AppError::Validation(format!("スマートフォルダが見つかりません: {}", id))
+        }
+        other => AppError::Database(other.to_string()),
+    })
+}
+
 pub fn create_smart_folder(
     conn: &Connection,
     name: &str,
@@ -442,6 +464,52 @@ pub fn get_archive_summaries_filtered(
         conditions.push(format!("af.folder_id = ?{}", param_idx));
         param_values.push(Box::new(folder_id.clone()));
         param_idx += 1;
+    }
+
+    // Smart folder filter
+    if let Some(ref smart_folder_id) = filter.smart_folder_id {
+        let sf = get_smart_folder_by_id(conn, smart_folder_id)?;
+        let sf_conditions: SmartFolderConditions = serde_json::from_str(&sf.conditions)?;
+        let mut sf_parts: Vec<String> = Vec::new();
+        for rule in &sf_conditions.rules {
+            match (rule.field.as_str(), rule.op.as_str()) {
+                ("tag", "contains") => {
+                    let val = format!("%{}%", rule.value.as_str().unwrap_or(""));
+                    sf_parts.push(format!(
+                        "EXISTS (SELECT 1 FROM archive_tags at2 JOIN tags t2 ON at2.tag_id = t2.id WHERE at2.archive_id = a.id AND t2.name LIKE ?{})",
+                        param_idx
+                    ));
+                    param_values.push(Box::new(val));
+                    param_idx += 1;
+                }
+                ("tag", "eq") => {
+                    let val = rule.value.as_str().unwrap_or("").to_string();
+                    sf_parts.push(format!(
+                        "EXISTS (SELECT 1 FROM archive_tags at2 JOIN tags t2 ON at2.tag_id = t2.id WHERE at2.archive_id = a.id AND t2.name = ?{})",
+                        param_idx
+                    ));
+                    param_values.push(Box::new(val));
+                    param_idx += 1;
+                }
+                ("rank", op) => {
+                    let sql_op = match op {
+                        "gte" => ">=",
+                        "lte" => "<=",
+                        "eq" => "=",
+                        _ => continue,
+                    };
+                    let val = rule.value.as_i64().unwrap_or(0) as i32;
+                    sf_parts.push(format!("a.rank {} ?{}", sql_op, param_idx));
+                    param_values.push(Box::new(val));
+                    param_idx += 1;
+                }
+                _ => {}
+            }
+        }
+        if !sf_parts.is_empty() {
+            let joiner = if sf_conditions.r#match == "any" { " OR " } else { " AND " };
+            conditions.push(format!("({})", sf_parts.join(joiner)));
+        }
     }
 
     // Preset filters
@@ -1168,5 +1236,77 @@ mod tests {
 
         let folders = get_folders(&conn).unwrap();
         assert_eq!(folders.len(), 2);
+    }
+
+    #[test]
+    fn test_get_smart_folder_by_id() {
+        let conn = setup_db();
+        let sf = create_smart_folder(&conn, "High Rank", r#"{"match":"all","rules":[{"field":"rank","op":"gte","value":3}]}"#).unwrap();
+        let found = get_smart_folder_by_id(&conn, &sf.id).unwrap();
+        assert_eq!(found.name, "High Rank");
+        assert!(found.conditions.contains("rank"));
+    }
+
+    #[test]
+    fn test_get_smart_folder_by_id_not_found() {
+        let conn = setup_db();
+        let result = get_smart_folder_by_id(&conn, "nonexistent");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_smart_folder_filter_rank_gte() {
+        let conn = setup_db();
+        let mut a1 = make_test_archive("a1", "Low Rank");
+        a1.rank = 1;
+        let mut a2 = make_test_archive("a2", "High Rank");
+        a2.rank = 4;
+        insert_archive(&conn, &a1).unwrap();
+        insert_archive(&conn, &a2).unwrap();
+        let sf = create_smart_folder(&conn, "Rank 3+", r#"{"match":"all","rules":[{"field":"rank","op":"gte","value":3}]}"#).unwrap();
+        let filter = ArchiveFilter {
+            smart_folder_id: Some(sf.id), folder_id: None, preset: None,
+            sort_by: None, sort_order: None, filter_tags: None, filter_min_rank: None, search_query: None,
+        };
+        let results = get_archive_summaries_filtered(&conn, &filter).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "High Rank");
+    }
+
+    #[test]
+    fn test_smart_folder_filter_tag_contains() {
+        let conn = setup_db();
+        insert_archive(&conn, &make_test_archive("a1", "Action Manga")).unwrap();
+        insert_archive(&conn, &make_test_archive("a2", "Romance Manga")).unwrap();
+        let tag = create_tag(&conn, "Action").unwrap();
+        set_archive_tags(&conn, "a1", &[tag.id.clone()]).unwrap();
+        let sf = create_smart_folder(&conn, "Action Tag", r#"{"match":"all","rules":[{"field":"tag","op":"contains","value":"Action"}]}"#).unwrap();
+        let filter = ArchiveFilter {
+            smart_folder_id: Some(sf.id), folder_id: None, preset: None,
+            sort_by: None, sort_order: None, filter_tags: None, filter_min_rank: None, search_query: None,
+        };
+        let results = get_archive_summaries_filtered(&conn, &filter).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Action Manga");
+    }
+
+    #[test]
+    fn test_smart_folder_filter_any_match() {
+        let conn = setup_db();
+        let mut a1 = make_test_archive("a1", "High Rank");
+        a1.rank = 5;
+        let mut a2 = make_test_archive("a2", "Low Rank");
+        a2.rank = 1;
+        insert_archive(&conn, &a1).unwrap();
+        insert_archive(&conn, &a2).unwrap();
+        let tag = create_tag(&conn, "Featured").unwrap();
+        set_archive_tags(&conn, "a2", &[tag.id.clone()]).unwrap();
+        let sf = create_smart_folder(&conn, "Any Match", r#"{"match":"any","rules":[{"field":"rank","op":"gte","value":4},{"field":"tag","op":"contains","value":"Featured"}]}"#).unwrap();
+        let filter = ArchiveFilter {
+            smart_folder_id: Some(sf.id), folder_id: None, preset: None,
+            sort_by: None, sort_order: None, filter_tags: None, filter_min_rank: None, search_query: None,
+        };
+        let results = get_archive_summaries_filtered(&conn, &filter).unwrap();
+        assert_eq!(results.len(), 2);
     }
 }
