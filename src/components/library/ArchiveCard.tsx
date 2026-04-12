@@ -127,6 +127,7 @@ export default function ArchiveCard({ archive, libraryPath, onDoubleClick, onCon
             src={thumbnailUrl}
             alt={archive.title}
             loading="lazy"
+            draggable={false}
             onError={() => setImgError(true)}
             style={{
               width: '100%',
