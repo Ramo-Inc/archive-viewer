@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash \"C:/Users/ogawa/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/brainstorming/scripts/start-server.sh\" --project-dir \"d:/Dev/App/ComicViewer\")",
+      "WebSearch",
+      "WebFetch(domain:v2.tauri.app)"
+    ]
+  }
+}
