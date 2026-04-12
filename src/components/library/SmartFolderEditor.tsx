@@ -55,28 +55,34 @@ function parseExistingRules(existing?: SmartFolder): {
     };
   }
 
-  // Reconstruct rules from the existing filter
+  // Reconstruct rules from the conditions JSON string
   const rules: Rule[] = [];
-  const filter = existing.filter;
-
-  if (filter.tag_ids && filter.tag_ids.length > 0) {
-    for (const tagId of filter.tag_ids) {
-      rules.push({ field: 'tag', op: 'contains', value: String(tagId) });
+  try {
+    const parsed = JSON.parse(existing.conditions) as {
+      match?: string;
+      rules?: { field: string; op: string; value: unknown }[];
+    };
+    const matchMode: MatchMode = parsed.match === 'any' ? 'any' : 'all';
+    if (parsed.rules) {
+      for (const r of parsed.rules) {
+        rules.push({
+          field: (r.field as RuleField) || 'tag',
+          op: (r.op as RuleOp) || 'contains',
+          value: String(r.value ?? ''),
+        });
+      }
     }
+    if (rules.length === 0) {
+      rules.push({ field: 'tag', op: 'contains', value: '' });
+    }
+    return { name: existing.name, match: matchMode, rules };
+  } catch {
+    return {
+      name: existing.name,
+      match: 'all',
+      rules: [{ field: 'tag', op: 'contains', value: '' }],
+    };
   }
-  if (filter.rating_min !== undefined) {
-    rules.push({ field: 'rank', op: 'gte', value: String(filter.rating_min) });
-  }
-
-  if (rules.length === 0) {
-    rules.push({ field: 'tag', op: 'contains', value: '' });
-  }
-
-  return {
-    name: existing.name,
-    match: 'all',
-    rules,
-  };
 }
 
 export default function SmartFolderEditor({
@@ -131,15 +137,15 @@ export default function SmartFolderEditor({
       return;
     }
 
-    // Build conditions JSON
-    const conditions = {
+    // Build conditions as JSON string (backend expects String)
+    const conditions = JSON.stringify({
       match,
       rules: validRules.map((r) => ({
         field: r.field,
         op: r.op,
         value: r.field === 'rank' ? Number(r.value) : r.value,
       })),
-    };
+    });
 
     setSaving(true);
     try {

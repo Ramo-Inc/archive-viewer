@@ -30,15 +30,13 @@ pub fn generate_thumbnail(image_data: &[u8], output_path: &Path) -> Result<(), A
     Ok(())
 }
 
-/// 画像データからサイズを取得
+/// 画像データからサイズを取得 (ヘッダのみ読み取り — フルデコードしない)
 pub fn get_image_dimensions(image_data: &[u8]) -> Result<(u32, u32), AppError> {
-    let img = ImageReader::new(Cursor::new(image_data))
+    ImageReader::new(Cursor::new(image_data))
         .with_guessed_format()
         .map_err(|e| AppError::FileIO(format!("画像フォーマット判定失敗: {}", e)))?
-        .decode()
-        .map_err(|e| AppError::FileIO(format!("画像デコード失敗: {}", e)))?;
-
-    Ok((img.width(), img.height()))
+        .into_dimensions()
+        .map_err(|e| AppError::FileIO(format!("画像サイズ取得失敗: {}", e)))
 }
 
 /// 見開きページ判定 (横 > 縦 * 1.2)

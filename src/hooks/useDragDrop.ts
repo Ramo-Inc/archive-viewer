@@ -63,22 +63,21 @@ async function handleDrop(payload: {
   }
 
   // Determine target folder via elementFromPoint + data-folder-id
-  let folderId: number | null = null;
+  let folderId: string | null = null;
   const element = document.elementFromPoint(position.x, position.y);
   if (element) {
     const folderEl = (element as HTMLElement).closest('[data-folder-id]');
     if (folderEl) {
       const raw = folderEl.getAttribute('data-folder-id');
-      if (raw !== null) {
-        folderId = parseInt(raw, 10);
-        if (isNaN(folderId)) folderId = null;
+      if (raw !== null && !raw.startsWith('smart-')) {
+        folderId = raw;
       }
     }
   }
 
   try {
     await tauriInvoke('import_dropped_files', {
-      paths: archivePaths,
+      filePaths: archivePaths,
       folderId,
     });
     addToast(`${archivePaths.length}件のファイルをインポートしました`, 'success');

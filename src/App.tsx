@@ -18,11 +18,13 @@ export default function App() {
 
   useEffect(() => {
     const checkLibrary = async () => {
+      console.log('[App] Checking library path...');
       try {
         const path = await tauriInvoke<string | null>('get_library_path');
+        console.log('[App] Library path:', path);
         setLibraryReady(path !== null);
-      } catch {
-        // Backend not ready yet or command not found — treat as not configured
+      } catch (e) {
+        console.warn('[App] get_library_path failed:', e);
         setLibraryReady(false);
       } finally {
         setChecking(false);

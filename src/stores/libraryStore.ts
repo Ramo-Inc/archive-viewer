@@ -20,9 +20,8 @@ interface LibraryState {
   tags: Tag[];
   smartFolders: SmartFolder[];
   archives: ArchiveSummary[];
-  totalCount: number;
-  selectedArchiveIds: Set<number>;
-  /** Currently applied filter (sent to backend per Errata E3-2). */
+  selectedArchiveIds: Set<string>;
+  /** Currently applied filter (sent to backend). */
   filter: ArchiveFilter;
 
   // --- UI flags ---
@@ -36,15 +35,13 @@ interface LibraryState {
   fetchFolders: () => Promise<void>;
   fetchTags: () => Promise<void>;
   fetchSmartFolders: () => Promise<void>;
-  selectArchive: (id: number, multi?: boolean) => void;
+  selectArchive: (id: string, multi?: boolean) => void;
   clearSelection: () => void;
 }
 
 const DEFAULT_FILTER: ArchiveFilter = {
   sort_by: 'title',
   sort_order: 'asc',
-  offset: 0,
-  limit: 100,
 };
 
 export const useLibraryStore = create<LibraryState>((set, get) => ({
@@ -53,7 +50,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   tags: [],
   smartFolders: [],
   archives: [],
-  totalCount: 0,
   selectedArchiveIds: new Set(),
   filter: { ...DEFAULT_FILTER },
   loading: false,
@@ -62,7 +58,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   // --- actions ---
 
   setFilter: (patch) => {
-    set((s) => ({ filter: { ...s.filter, ...patch, offset: 0 } }));
+    set((s) => ({ filter: { ...s.filter, ...patch } }));
     // Re-fetch with updated filter
     get().fetchArchives();
   },
@@ -76,11 +72,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const { filter } = get();
     set({ loading: true, error: null });
     try {
-      const result = await tauriInvoke<{
-        items: ArchiveSummary[];
-        total: number;
-      }>('get_archives', { filter });
-      set({ archives: result.items, totalCount: result.total, loading: false });
+      // Backend returns Vec<ArchiveSummary> directly (not paginated)
+      const archives = await tauriInvoke<ArchiveSummary[]>('get_archives', { filter });
+      set({ archives, loading: false });
     } catch (e) {
       set({ error: String(e), loading: false });
     }
@@ -115,7 +109,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
   selectArchive: (id, multi = false) => {
     set((s) => {
-      const next = multi ? new Set(s.selectedArchiveIds) : new Set<number>();
+      const next = multi ? new Set(s.selectedArchiveIds) : new Set<string>();
       if (next.has(id)) {
         next.delete(id);
       } else {

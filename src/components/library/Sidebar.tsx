@@ -53,80 +53,63 @@ function SidebarItem({ label, icon, active, onClick, dataFolderId }: SidebarItem
 interface FolderItemProps {
   folder: Folder;
   depth: number;
-  activeFolderId: number | null | undefined;
-  onSelect: (id: number | null) => void;
+  activeFolderId: string | null | undefined;
+  onSelect: (id: string | null) => void;
 }
 
 function FolderItem({ folder, depth, activeFolderId, onSelect }: FolderItemProps) {
   return (
-    <>
-      <div
-        role="button"
-        tabIndex={0}
-        data-folder-id={String(folder.id)}
-        onClick={() => onSelect(folder.id)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            onSelect(folder.id);
-          }
-        }}
+    <div
+      role="button"
+      tabIndex={0}
+      data-folder-id={folder.id}
+      onClick={() => onSelect(folder.id)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect(folder.id);
+        }
+      }}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '6px 10px',
+        paddingLeft: 10 + depth * 16,
+        borderRadius: 4,
+        cursor: 'pointer',
+        fontSize: 13,
+        background: activeFolderId === folder.id ? 'var(--bg-hover)' : 'transparent',
+        color:
+          activeFolderId === folder.id ? 'var(--text-primary)' : 'var(--text-secondary)',
+        transition: 'background 0.15s',
+      }}
+      onMouseEnter={(e) => {
+        if (activeFolderId !== folder.id)
+          e.currentTarget.style.background = 'var(--bg-card)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background =
+          activeFolderId === folder.id ? 'var(--bg-hover)' : 'transparent';
+      }}
+    >
+      <span style={{ fontSize: 14, width: 18, textAlign: 'center' }}>📁</span>
+      <span
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '6px 10px',
-          paddingLeft: 10 + depth * 16,
-          borderRadius: 4,
-          cursor: 'pointer',
-          fontSize: 13,
-          background: activeFolderId === folder.id ? 'var(--bg-hover)' : 'transparent',
-          color:
-            activeFolderId === folder.id ? 'var(--text-primary)' : 'var(--text-secondary)',
-          transition: 'background 0.15s',
-        }}
-        onMouseEnter={(e) => {
-          if (activeFolderId !== folder.id)
-            e.currentTarget.style.background = 'var(--bg-card)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background =
-            activeFolderId === folder.id ? 'var(--bg-hover)' : 'transparent';
+          flex: 1,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
         }}
       >
-        <span style={{ fontSize: 14, width: 18, textAlign: 'center' }}>📁</span>
-        <span
-          style={{
-            flex: 1,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {folder.name}
-        </span>
-        {folder.archive_count > 0 && (
-          <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-            {folder.archive_count}
-          </span>
-        )}
-      </div>
-      {folder.children?.map((child) => (
-        <FolderItem
-          key={child.id}
-          folder={child}
-          depth={depth + 1}
-          activeFolderId={activeFolderId}
-          onSelect={onSelect}
-        />
-      ))}
-    </>
+        {folder.name}
+      </span>
+    </div>
   );
 }
 
 /**
  * Sidebar -- Left side panel with preset filters, folders, and smart folders.
- * Each item has data-folder-id for D&D, tabIndex={0} and onKeyDown (Errata M-20).
  */
 export default function Sidebar() {
   const filter = useLibraryStore((s) => s.filter);
@@ -136,79 +119,44 @@ export default function Sidebar() {
   const smartFolders = useLibraryStore((s) => s.smartFolders);
 
   const isPresetActive = (preset: string) => {
-    switch (preset) {
-      case 'all':
-        return (
-          !filter.folder_id &&
-          !filter.smart_folder_id &&
-          !filter.favorite_only &&
-          !filter.rating_min
-        );
-      case 'favorite':
-        return filter.favorite_only === true;
-      case 'unread':
-        return filter.sort_by === 'last_read_at' && !filter.favorite_only;
-      case 'recent':
-        return filter.sort_by === 'last_read_at' && filter.sort_order === 'desc';
-      default:
-        return false;
+    if (preset === 'all') {
+      return !filter.folder_id && !filter.smart_folder_id && !filter.preset;
     }
+    return filter.preset === preset;
   };
 
   const handlePreset = useCallback(
     (preset: string) => {
-      switch (preset) {
-        case 'all':
-          resetFilter();
-          break;
-        case 'favorite':
-          setFilter({
-            folder_id: undefined,
-            smart_folder_id: undefined,
-            favorite_only: true,
-          });
-          break;
-        case 'unread':
-          // Unread = never read (read_count == 0), handled backend-side via filter
-          setFilter({
-            folder_id: undefined,
-            smart_folder_id: undefined,
-            favorite_only: undefined,
-            sort_by: 'last_read_at',
-            sort_order: 'asc',
-          });
-          break;
-        case 'recent':
-          setFilter({
-            folder_id: undefined,
-            smart_folder_id: undefined,
-            favorite_only: undefined,
-            sort_by: 'last_read_at',
-            sort_order: 'desc',
-          });
-          break;
+      if (preset === 'all') {
+        resetFilter();
+      } else {
+        setFilter({
+          folder_id: undefined,
+          smart_folder_id: undefined,
+          preset,
+        });
       }
     },
     [resetFilter, setFilter],
   );
 
   const handleFolderSelect = useCallback(
-    (folderId: number | null) => {
+    (folderId: string | null) => {
       setFilter({
         folder_id: folderId,
         smart_folder_id: undefined,
-        favorite_only: undefined,
+        preset: undefined,
       });
     },
     [setFilter],
   );
 
   const handleSmartFolderSelect = useCallback(
-    (sfId: number) => {
+    (sfId: string) => {
       setFilter({
         smart_folder_id: sfId,
         folder_id: undefined,
-        favorite_only: undefined,
+        preset: undefined,
       });
     },
     [setFilter],
@@ -288,7 +236,7 @@ export default function Sidebar() {
             <SidebarItem
               key={sf.id}
               label={sf.name}
-              icon={sf.icon ?? '🔍'}
+              icon="🔍"
               active={filter.smart_folder_id === sf.id}
               onClick={() => handleSmartFolderSelect(sf.id)}
               dataFolderId={`smart-${sf.id}`}

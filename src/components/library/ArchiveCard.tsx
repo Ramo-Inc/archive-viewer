@@ -7,7 +7,7 @@ import type { ArchiveSummary } from '../../types';
 interface ArchiveCardProps {
   archive: ArchiveSummary;
   libraryPath: string;
-  onDoubleClick?: (id: number) => void;
+  onDoubleClick?: (id: string) => void;
 }
 
 /**
@@ -23,15 +23,12 @@ export default function ArchiveCard({ archive, libraryPath, onDoubleClick }: Arc
   const [imgError, setImgError] = useState(false);
 
   const thumbnailUrl = useMemo(() => {
-    if (!archive.thumbnail) return null;
-    // If it already looks like a URL or data URI, use as-is
-    if (archive.thumbnail.startsWith('http') || archive.thumbnail.startsWith('data:')) {
-      return archive.thumbnail;
-    }
-    // Build absolute path and convert for Tauri asset protocol
-    const absolutePath = `${libraryPath}/${archive.thumbnail}`;
+    if (!archive.thumbnail_path) return null;
+    const thumb = archive.thumbnail_path;
+    if (thumb.startsWith('http') || thumb.startsWith('data:')) return thumb;
+    const absolutePath = `${libraryPath}/${thumb}`;
     return convertFileSrc(absolutePath);
-  }, [archive.thumbnail, libraryPath]);
+  }, [archive.thumbnail_path, libraryPath]);
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
@@ -60,7 +57,7 @@ export default function ArchiveCard({ archive, libraryPath, onDoubleClick }: Arc
     <div
       tabIndex={0}
       role="button"
-      aria-label={`${archive.title} - ${archive.rating}星 - ${archive.page_count}ページ`}
+      aria-label={`${archive.title} - ${archive.rank}星`}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onKeyDown={handleKeyDown}
@@ -135,7 +132,7 @@ export default function ArchiveCard({ archive, libraryPath, onDoubleClick }: Arc
         >
           {archive.title}
         </div>
-        <RankStars value={archive.rating} size={12} readOnly />
+        <RankStars value={archive.rank} size={12} readOnly />
       </div>
     </div>
   );

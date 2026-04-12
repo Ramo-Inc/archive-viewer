@@ -18,7 +18,7 @@ import ViewerOverlay from '../components/viewer/ViewerOverlay';
  * Silently catches errors since the backend command may not
  * be registered yet.
  */
-async function savePosition(archiveId: number, page: number): Promise<void> {
+async function savePosition(archiveId: string, page: number): Promise<void> {
   try {
     await tauriInvoke('save_read_position', {
       archiveId,
@@ -52,7 +52,7 @@ export default function ViewerPage() {
   // --- Initial load ---
   useEffect(() => {
     if (archiveId) {
-      openArchive(Number(archiveId));
+      openArchive(archiveId);
     }
     // Errata HI-7: no async cleanup — navigation only via handleBack
     return () => {
@@ -80,7 +80,7 @@ export default function ViewerPage() {
   // --- Handle back: save position, cleanup, navigate ---
   const handleBack = useCallback(async () => {
     if (archive && archiveId) {
-      await savePosition(Number(archiveId), currentPage);
+      await savePosition(archiveId, currentPage);
     }
     closeArchive();
     navigate('/');

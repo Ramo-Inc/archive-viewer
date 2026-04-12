@@ -13,6 +13,7 @@ use tauri::{Manager, State};
 pub fn run() {
     tauri::Builder::default()
         .manage(DbState::empty())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -20,6 +21,11 @@ pub fn run() {
                         .level(log::LevelFilter::Info)
                         .build(),
                 )?;
+
+                // 開発時はDevToolsを自動で開く
+                if let Some(window) = app.get_webview_window("main") {
+                    window.open_devtools();
+                }
             }
 
             // config読み込み → ライブラリパスがあればDB初期化 + 整合性チェック

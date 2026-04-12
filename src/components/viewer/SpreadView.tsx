@@ -15,23 +15,15 @@ interface SpreadViewProps {
 
 /**
  * Build the page image URL from a PageInfo.
- *
- * The Rust backend sends `url` (e.g. "asset://localhost/...") while
- * the TS PageInfo type declares `filename`. We handle both fields
- * so the component works regardless of which name the backend uses.
- * If neither looks like a URL we use convertFileSrc to create one.
+ * The Rust backend sends a file path — we use convertFileSrc
+ * to create the platform-correct asset URL.
+ * (Windows: http://asset.localhost/..., macOS/Linux: asset://localhost/...)
  */
 function pageUrl(page: PageInfo): string {
-  // The backend's PageInfo.url may arrive as an extra field not in the TS type
-  const raw =
-    page.filename ||
-    (page as unknown as Record<string, string>).url ||
-    '';
-  // If it already looks like a protocol URL, use as-is
-  if (raw.startsWith('asset://') || raw.startsWith('http')) {
+  const raw = page.url || '';
+  if (raw.startsWith('http://') || raw.startsWith('https://')) {
     return raw;
   }
-  // Convert a local file path to a Tauri asset URL
   return convertFileSrc(raw);
 }
 

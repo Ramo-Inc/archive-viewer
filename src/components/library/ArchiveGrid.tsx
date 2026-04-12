@@ -5,7 +5,7 @@ import { tauriInvoke } from '../../hooks/useTauriCommand';
 import ArchiveCard from './ArchiveCard';
 
 interface ArchiveGridProps {
-  onOpenViewer: (archiveId: number) => void;
+  onOpenViewer: (archiveId: string) => void;
 }
 
 /**
@@ -41,7 +41,7 @@ export default function ArchiveGrid({ onOpenViewer }: ArchiveGridProps) {
   }, []);
 
   const handleDoubleClick = useCallback(
-    (archiveId: number) => {
+    (archiveId: string) => {
       onOpenViewer(archiveId);
     },
     [onOpenViewer],

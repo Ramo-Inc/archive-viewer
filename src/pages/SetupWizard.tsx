@@ -36,7 +36,7 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
     setLoading(true);
     setError(null);
     try {
-      await tauriInvoke('init_library', { path: selectedPath });
+      await tauriInvoke('init_library', { libraryPath: selectedPath });
       onComplete();
     } catch (e) {
       setError(String(e));

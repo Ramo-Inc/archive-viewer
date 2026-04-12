@@ -6,7 +6,7 @@ import Sidebar from '../components/library/Sidebar';
 import ArchiveGrid from '../components/library/ArchiveGrid';
 import DetailPanel from '../components/library/DetailPanel';
 import DragDropZone from '../components/common/DragDropZone';
-import { ToastContainer } from '../components/common/Toast';
+import ToastContainer from '../components/common/Toast';
 import { useDragDrop } from '../hooks/useDragDrop';
 
 /**
@@ -31,7 +31,7 @@ export default function LibraryPage() {
   }, [fetchArchives, fetchFolders, fetchTags, fetchSmartFolders]);
 
   const handleOpenViewer = useCallback(
-    (archiveId: number) => {
+    (archiveId: string) => {
       navigate(`/viewer/${archiveId}`);
     },
     [navigate],

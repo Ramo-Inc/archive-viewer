@@ -1,11 +1,11 @@
 import { create } from 'zustand';
-import type { ArchiveDetail, PageInfo } from '../types';
+import type { ArchiveDetail, PageInfo, ViewerArchive } from '../types';
 import { tauriInvoke } from '../hooks/useTauriCommand';
 
 // ============================================================
 // Viewer store — page navigation, spread handling, etc.
 // nextPage / prevPage honour is_spread, cover page, and
-// the current spread (two-page) display mode (Errata E4-3).
+// the current spread (two-page) display mode.
 // ============================================================
 
 export type ViewMode = 'single' | 'spread' | 'webtoon';
@@ -13,7 +13,7 @@ export type PageOrder = 'rtl' | 'ltr';
 
 interface ViewerState {
   // --- data ---
-  archive: ArchiveDetail | null;
+  archive: ViewerArchive | null;
   currentPage: number;
 
   // --- settings ---
@@ -28,7 +28,7 @@ interface ViewerState {
   sidebarOpen: boolean;
 
   // --- actions ---
-  openArchive: (archiveId: number) => Promise<void>;
+  openArchive: (archiveId: string) => Promise<void>;
   closeArchive: () => void;
   goToPage: (page: number) => void;
   nextPage: () => void;
@@ -50,31 +50,22 @@ function computeStep(
   viewMode: ViewMode,
   coverAlone: boolean,
 ): number {
-  // In single or webtoon mode every step is 1
   if (viewMode !== 'spread') return 1;
-
-  // Cover page (index 0) shown alone when coverAlone is true
   if (current === 0 && coverAlone && direction === 1) return 1;
-
-  // If the current page is a spread (double-width), step by 1
   const page = pages[current];
   if (page?.is_spread) return 1;
 
-  // Going forward: check if the *next* page is a spread — if so step 1
   if (direction === 1) {
     const next = pages[current + 1];
     if (!next || next.is_spread) return 1;
     return 2;
   }
 
-  // Going backward: look at previous page
   if (direction === -1) {
-    // If we came from the cover-alone page
     if (current === 1 && coverAlone) return 1;
     const prev = pages[current - 1];
     if (!prev) return 1;
     if (prev.is_spread) return 1;
-    // Check if two pages back is a spread or cover-alone boundary
     if (current - 2 === 0 && coverAlone) return 1;
     return 2;
   }
@@ -95,16 +86,28 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   openArchive: async (archiveId) => {
     set({ loading: true, error: null });
     try {
-      const archive = await tauriInvoke<ArchiveDetail>('get_archive_detail', {
-        archiveId,
+      const archiveIdStr = archiveId;
+      // 1. Get archive metadata
+      const detail = await tauriInvoke<ArchiveDetail>('get_archive_detail', {
+        id: archiveIdStr,
       });
+      // 2. Prepare pages (extract to temp dir)
+      const pages = await tauriInvoke<PageInfo[]>('prepare_pages', {
+        archiveId: archiveIdStr,
+      });
+      // 3. Assemble ViewerArchive
+      const archive: ViewerArchive = { ...detail, pages };
       set({ archive, currentPage: 0, loading: false });
     } catch (e) {
       set({ error: String(e), loading: false });
     }
   },
 
-  closeArchive: () => set({ archive: null, currentPage: 0 }),
+  closeArchive: () => {
+    // Cleanup temp pages when closing
+    tauriInvoke('cleanup_temp_pages').catch(() => {});
+    set({ archive: null, currentPage: 0 });
+  },
 
   goToPage: (page) => {
     const { archive } = get();
@@ -116,13 +119,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   nextPage: () => {
     const { archive, currentPage, viewMode, coverAlone } = get();
     if (!archive) return;
-    const step = computeStep(
-      archive.pages,
-      currentPage,
-      1,
-      viewMode,
-      coverAlone,
-    );
+    const step = computeStep(archive.pages, currentPage, 1, viewMode, coverAlone);
     const next = Math.min(currentPage + step, archive.pages.length - 1);
     set({ currentPage: next });
   },
@@ -130,13 +127,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   prevPage: () => {
     const { archive, currentPage, viewMode, coverAlone } = get();
     if (!archive) return;
-    const step = computeStep(
-      archive.pages,
-      currentPage,
-      -1,
-      viewMode,
-      coverAlone,
-    );
+    const step = computeStep(archive.pages, currentPage, -1, viewMode, coverAlone);
     const prev = Math.max(currentPage - step, 0);
     set({ currentPage: prev });
   },

@@ -13,7 +13,7 @@ import type { Tag } from '../../types';
 // ============================================================
 
 interface TagEditorProps {
-  archiveId: number;
+  archiveId: string;
   /** Currently assigned tags for the archive */
   currentTags: Tag[];
   onClose: () => void;
@@ -30,14 +30,14 @@ export default function TagEditor({
   const fetchTags = useLibraryStore((s) => s.fetchTags);
   const addToast = useToastStore((s) => s.addToast);
 
-  // Set of selected tag IDs
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(
+  // Set of selected tag IDs (strings)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
     () => new Set(currentTags.map((t) => t.id)),
   );
   const [newTagName, setNewTagName] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const toggleTag = useCallback((tagId: number) => {
+  const toggleTag = useCallback((tagId: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(tagId)) {

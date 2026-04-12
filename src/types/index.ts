@@ -1,105 +1,92 @@
 // ============================================================
-// Data model types aligned with the PRD / Rust backend
+// Data model types — aligned with Rust backend (src-tauri/src/db/models.rs)
+// IDs are String (UUID) in the backend, represented as string here.
 // ============================================================
 
 /** Summary returned when listing archives in the library grid. */
 export interface ArchiveSummary {
-  id: number;
+  id: string;
   title: string;
-  path: string;
-  folder_id: number | null;
-  page_count: number;
-  /** base64-encoded thumbnail or asset URL */
-  thumbnail: string | null;
-  rating: number;
-  favorite: boolean;
-  read_count: number;
-  last_read_at: string | null;
-  created_at: string;
-  updated_at: string;
-  tags: Tag[];
+  thumbnail_path: string | null;
+  rank: number;
+  is_read: boolean;
+  format: string;
+  missing: boolean;
 }
 
 /** Full detail returned when opening a single archive. */
 export interface ArchiveDetail {
-  id: number;
+  id: string;
   title: string;
-  path: string;
-  folder_id: number | null;
+  file_name: string;
+  file_size: number;
   page_count: number;
-  thumbnail: string | null;
-  rating: number;
-  favorite: boolean;
-  read_count: number;
-  last_read_at: string | null;
+  format: string;
+  thumbnail_path: string | null;
+  rank: number;
+  memo: string;
+  is_read: boolean;
+  last_read_page: number;
+  missing: boolean;
   created_at: string;
   updated_at: string;
   tags: Tag[];
+  folders: Folder[];
+}
+
+/** ArchiveDetail + pages (assembled in the frontend after prepare_pages) */
+export interface ViewerArchive extends ArchiveDetail {
   pages: PageInfo[];
 }
 
 /** Payload for updating archive metadata. */
 export interface ArchiveUpdate {
   title?: string;
-  rating?: number;
-  favorite?: boolean;
-  tag_ids?: number[];
+  rank?: number;
+  memo?: string;
+  is_read?: boolean;
 }
 
-/** Filter / sort criteria sent to the backend (Errata E3-2). */
+/** Filter / sort criteria sent to the backend. */
 export interface ArchiveFilter {
-  folder_id?: number | null;
-  smart_folder_id?: number | null;
+  folder_id?: string | null;
+  smart_folder_id?: string | null;
+  preset?: string;
+  sort_by?: string;
+  sort_order?: string;
+  filter_tags?: string[];
+  filter_min_rank?: number;
   search_query?: string;
-  tag_ids?: number[];
-  rating_min?: number;
-  favorite_only?: boolean;
-  sort_by?: SortField;
-  sort_order?: SortOrder;
-  offset?: number;
-  limit?: number;
 }
-
-export type SortField =
-  | 'title'
-  | 'created_at'
-  | 'updated_at'
-  | 'last_read_at'
-  | 'rating'
-  | 'page_count';
-
-export type SortOrder = 'asc' | 'desc';
 
 /** A physical folder registered in the library. */
 export interface Folder {
-  id: number;
+  id: string;
   name: string;
-  path: string;
-  parent_id: number | null;
-  archive_count: number;
-  children?: Folder[];
+  parent_id: string | null;
+  sort_order: number;
+  created_at: string;
 }
 
 /** A tag that can be attached to archives. */
 export interface Tag {
-  id: number;
+  id: string;
   name: string;
-  color: string | null;
-  archive_count?: number;
 }
 
 /** A smart folder (saved filter). */
 export interface SmartFolder {
-  id: number;
+  id: string;
   name: string;
-  icon: string | null;
-  filter: ArchiveFilter;
+  conditions: string;
+  sort_order: number;
+  created_at: string;
 }
 
 /** Information about a single page within an archive. */
 export interface PageInfo {
   index: number;
-  filename: string;
+  url: string;
   width: number;
   height: number;
   /** Whether this page should be displayed as a spread (double-width). */

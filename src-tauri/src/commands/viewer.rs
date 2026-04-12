@@ -79,13 +79,10 @@ pub fn prepare_pages(
             .unwrap_or((0, 0));
         let is_spread = thumbnail::is_spread_page(width, height);
 
-        // URLをファイルパスから構築
-        let url = format!(
-            "asset://localhost/{}",
-            page_path
-                .to_string_lossy()
-                .replace('\\', "/")
-        );
+        // ファイルパスをそのまま返す (フロントエンドでconvertFileSrcを使用)
+        let url = page_path
+            .to_string_lossy()
+            .replace('\\', "/");
 
         page_infos.push(PageInfo {
             index: idx,
