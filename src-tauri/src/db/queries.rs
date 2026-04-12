@@ -476,7 +476,7 @@ pub fn get_archive_summaries_filtered(
                     p
                 })
                 .collect();
-            conditions.push(format!("t.name IN ({})", placeholders.join(",")));
+            conditions.push(format!("t.id IN ({})", placeholders.join(",")));
             for tag in tags {
                 param_values.push(Box::new(tag.clone()));
             }
@@ -1123,7 +1123,7 @@ mod tests {
             preset: None,
             sort_by: None,
             sort_order: None,
-            filter_tags: Some(vec!["Action".to_string()]),
+            filter_tags: Some(vec![tag.id.clone()]),
             filter_min_rank: None,
             search_query: None,
         };
