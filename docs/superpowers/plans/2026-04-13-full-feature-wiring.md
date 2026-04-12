@@ -1298,7 +1298,7 @@ export default function DetailPanel({ onOpenViewer }: DetailPanelProps) {
     try {
       await tauriInvoke('update_archive', { id: detail.id, update: { rank: newRank } });
       setDetail((d) => d ? { ...d, rank: newRank } : d);
-      fetchArchives();
+      await fetchArchives();
     } catch (e) { console.error('Failed to update rank:', e); }
   }, [detail, fetchArchives]);
 
@@ -1310,7 +1310,7 @@ export default function DetailPanel({ onOpenViewer }: DetailPanelProps) {
     try {
       await tauriInvoke('update_archive', { id: detail.id, update: { title: trimmed } });
       setDetail((d) => d ? { ...d, title: trimmed } : d);
-      fetchArchives();
+      await fetchArchives();
     } catch (e) { addToast(`タイトル更新失敗: ${String(e)}`, 'error'); }
   }, [detail, titleDraft, fetchArchives, addToast]);
 
@@ -1328,7 +1328,7 @@ export default function DetailPanel({ onOpenViewer }: DetailPanelProps) {
     try {
       await tauriInvoke('update_archive', { id: detail.id, update: { is_read: newVal } });
       setDetail((d) => d ? { ...d, is_read: newVal } : d);
-      fetchArchives();
+      await fetchArchives();
     } catch (e) { addToast(`状態更新失敗: ${String(e)}`, 'error'); }
   }, [detail, fetchArchives, addToast]);
 
