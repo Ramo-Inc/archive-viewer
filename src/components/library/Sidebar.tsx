@@ -196,8 +196,8 @@ export default function Sidebar() {
       <SidebarItem
         label="お気に入り"
         icon="❤️"
-        active={isPresetActive('favorite')}
-        onClick={() => handlePreset('favorite')}
+        active={isPresetActive('favorites')}
+        onClick={() => handlePreset('favorites')}
       />
       <SidebarItem
         label="未読"

@@ -13,7 +13,7 @@ import { useToastStore } from '../stores/toastStore';
 // backend import command with a 500ms debounce.
 // ============================================================
 
-const SUPPORTED_EXTENSIONS = ['.zip', '.cbz', '.cbr'];
+const SUPPORTED_EXTENSIONS = ['.zip', '.cbz', '.cbr', '.rar'];
 const DEBOUNCE_MS = 500;
 
 function isSupportedFile(path: string): boolean {
