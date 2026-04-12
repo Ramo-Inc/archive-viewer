@@ -1,5 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { open } from '@tauri-apps/plugin-dialog';
 import { useLibraryStore } from '../../stores/libraryStore';
+import { tauriInvoke } from '../../hooks/useTauriCommand';
+import { useToastStore } from '../../stores/toastStore';
 
 const SORT_OPTIONS: { label: string; value: string }[] = [
   { label: '名前', value: 'title' },
@@ -17,6 +20,26 @@ export default function TopBar() {
   const tags = useLibraryStore((s) => s.tags);
   const archives = useLibraryStore((s) => s.archives);
   const loading = useLibraryStore((s) => s.loading);
+  const fetchArchives = useLibraryStore((s) => s.fetchArchives);
+  const addToast = useToastStore((s) => s.addToast);
+
+  const handleImport = useCallback(async () => {
+    try {
+      const selected = await open({
+        multiple: true,
+        filters: [
+          { name: 'Archives', extensions: ['zip', 'cbz', 'rar', 'cbr'] },
+        ],
+      });
+      if (!selected || selected.length === 0) return;
+      const filePaths = Array.isArray(selected) ? selected : [selected];
+      await tauriInvoke('import_archives', { filePaths, folderId: null });
+      await fetchArchives();
+      addToast(`${filePaths.length}件をインポートしました`, 'success');
+    } catch (e) {
+      addToast(`インポート失敗: ${String(e)}`, 'error');
+    }
+  }, [fetchArchives, addToast]);
 
   const [gridSize, setGridSize] = useState(180);
   const [searchText, setSearchText] = useState(filter.search_query ?? '');
@@ -260,6 +283,11 @@ export default function TopBar() {
           </div>
         )}
       </div>
+
+      {/* Import button */}
+      <button style={buttonStyle} onClick={handleImport}>
+        + インポート
+      </button>
 
       {/* Spacer */}
       <div style={{ flex: 1 }} />
