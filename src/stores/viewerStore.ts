@@ -85,16 +85,13 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   openArchive: async (archiveId) => {
     set({ loading: true, error: null });
     try {
-      const archiveIdStr = archiveId;
       // 1. Get archive metadata
       const detail = await tauriInvoke<ArchiveDetail>('get_archive_detail', {
-        id: archiveIdStr,
+        id: archiveId,
       });
-      // 2. Prepare pages with Lanczos3 pre-resize to display height
-      const targetHeight = Math.floor(window.innerHeight * (window.devicePixelRatio || 1));
+      // 2. Prepare pages — extract originals (WebGL Fant shader handles scaling)
       const pages = await tauriInvoke<PageInfo[]>('prepare_pages', {
-        archiveId: archiveIdStr,
-        targetHeight,
+        archiveId,
       });
       // 3. Assemble ViewerArchive
       const archive: ViewerArchive = { ...detail, pages };

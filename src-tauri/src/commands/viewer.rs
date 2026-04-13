@@ -18,14 +18,31 @@ struct CachedPageMeta {
     is_spread: bool,
 }
 
+/// キャッシュ全体のラッパー（バージョン管理付き）
+#[derive(Serialize, Deserialize)]
+struct CacheMeta {
+    version: u32,
+    pages: Vec<CachedPageMeta>,
+}
+
+/// キャッシュフォーマットバージョン。
+/// v1: リサイズ済み PNG（旧形式、JSON 配列）
+/// v2: 元画像をそのまま保存（WebGL でエリア平均法リサイズ）
+const CACHE_VERSION: u32 = 2;
+
 /// キャッシュからページ情報を読み込む
-/// meta.json が存在しパース可能なら Some(Vec<PageInfo>) を返す
+/// meta.json が存在しバージョンが一致すれば Some(Vec<PageInfo>) を返す
 fn try_load_cache(pages_dir: &std::path::Path) -> Option<Vec<PageInfo>> {
     let meta_path = pages_dir.join("meta.json");
     let meta_json = std::fs::read_to_string(&meta_path).ok()?;
-    let cached: Vec<CachedPageMeta> = serde_json::from_str(&meta_json).ok()?;
+    let cached: CacheMeta = serde_json::from_str(&meta_json).ok()?;
+
+    if cached.version != CACHE_VERSION {
+        return None;
+    }
 
     let page_infos = cached
+        .pages
         .into_iter()
         .map(|m| {
             let url = pages_dir
@@ -45,33 +62,12 @@ fn try_load_cache(pages_dir: &std::path::Path) -> Option<Vec<PageInfo>> {
     Some(page_infos)
 }
 
-/// 画像データを target_height に Lanczos3 でリサイズして返す
-/// target_height >= height の場合はリサイズせず元データを返す（アップスケール防止）
-/// 元画像のフォーマットを維持（JPEG→JPEG 95, それ以外→PNG）
-fn resize_page_data(data: &[u8], _width: u32, height: u32, target_height: u32) -> Result<Vec<u8>, AppError> {
-    if target_height >= height {
-        return Ok(data.to_vec());
-    }
-    let img = image::load_from_memory(data)
-        .map_err(|e| AppError::FileIO(format!("画像デコード失敗: {}", e)))?;
-    let resized = img.resize(u32::MAX, target_height, image::imageops::FilterType::Lanczos3);
-    let mut buf = Vec::new();
-    if data.len() >= 2 && data[0] == 0xFF && data[1] == 0xD8 {
-        resized.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Jpeg)
-            .map_err(|e| AppError::FileIO(format!("画像エンコード失敗: {}", e)))?;
-    } else {
-        resized.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
-            .map_err(|e| AppError::FileIO(format!("画像エンコード失敗: {}", e)))?;
-    }
-    Ok(buf)
-}
-
-/// アーカイブページをキャッシュディレクトリに展開し、meta.json を書き出す
+/// アーカイブページをキャッシュディレクトリに展開し、meta.json を書き出す。
+/// 元画像をそのまま保存（リサイズはフロントエンドの WebGL シェーダーで実行）。
 fn extract_to_cache(
     pages_dir: &std::path::Path,
     reader: &dyn archive::ArchiveReader,
     pages: &[archive::ArchivePageEntry],
-    target_height: Option<u32>,
 ) -> Result<Vec<PageInfo>, AppError> {
     let pages_dir_canonical = pages_dir
         .canonicalize()
@@ -89,7 +85,9 @@ fn extract_to_cache(
                 AppError::Archive(format!("不正なページ名: {}", page.name))
             })?;
 
-        let file_name = format!("{:03}_{}", idx, safe_filename.to_string_lossy());
+        // 元のファイル名（拡張子も維持）にインデックスプレフィクス付与
+        let safe_name = safe_filename.to_string_lossy();
+        let file_name = format!("{:03}_{}", idx, safe_name);
         let page_path = pages_dir.join(&file_name);
 
         // Zip Slip対策
@@ -108,29 +106,13 @@ fn extract_to_cache(
             }
         }
 
-        // 画像サイズ取得（リサイズ前の元サイズ）
-        let (orig_width, orig_height) = thumbnail::get_image_dimensions(&page_data)
+        // 元画像サイズ取得
+        let (width, height) = thumbnail::get_image_dimensions(&page_data)
             .unwrap_or((0, 0));
-        // is_spread は元画像サイズで判定
-        let is_spread = thumbnail::is_spread_page(orig_width, orig_height);
+        let is_spread = thumbnail::is_spread_page(width, height);
 
-        // target_height 指定時、元画像が大きければ Lanczos3 リサイズ
-        let final_data = if let Some(th) = target_height {
-            if orig_height > th && orig_height > 0 {
-                resize_page_data(&page_data, orig_width, orig_height, th)
-                    .unwrap_or(page_data)
-            } else {
-                page_data
-            }
-        } else {
-            page_data
-        };
-
-        std::fs::write(&page_path, &final_data)?;
-
-        // リサイズ後の実際のサイズを取得
-        let (width, height) = thumbnail::get_image_dimensions(&final_data)
-            .unwrap_or((orig_width, orig_height));
+        // 元画像をそのまま保存（リサイズなし）
+        std::fs::write(&page_path, &page_data)?;
 
         let url = page_path
             .to_string_lossy()
@@ -154,24 +136,27 @@ fn extract_to_cache(
     }
 
     // meta.json を最後に書き込み（展開完了の目印）
-    let meta_json = serde_json::to_string_pretty(&cached_metas)?;
+    let meta = CacheMeta {
+        version: CACHE_VERSION,
+        pages: cached_metas,
+    };
+    let meta_json = serde_json::to_string_pretty(&meta)?;
     std::fs::write(pages_dir.join("meta.json"), meta_json)?;
 
     Ok(page_infos)
 }
 
 /// ページ準備: キャッシュがあれば即返却、なければ展開してキャッシュ保存
+/// 元画像をそのまま保存し、スケーリングはフロントエンドの WebGL エリア平均法シェーダーで実行
 /// CR-1: Zip Slip対策付き (パストラバーサル防止)
 #[tauri::command]
 pub fn prepare_pages(
     state: State<'_, DbState>,
     archive_id: String,
-    target_height: Option<u32>,
 ) -> Result<Vec<PageInfo>, AppError> {
     let library_path = config::get_library_root()?;
 
     // キャッシュディレクトリ: archives/{archive_id}/pages/
-    // DB アクセスせずに archive_id から直接パスを構築（キャッシュヒット時の高速パス）
     let pages_dir = library_path
         .join("archives")
         .join(&archive_id)
@@ -213,7 +198,7 @@ pub fn prepare_pages(
 
     std::fs::create_dir_all(&pages_dir)?;
 
-    match extract_to_cache(&pages_dir, &*reader, &pages, target_height) {
+    match extract_to_cache(&pages_dir, &*reader, &pages) {
         Ok(page_infos) => Ok(page_infos),
         Err(e) => {
             // 展開失敗時はキャッシュを削除
@@ -321,28 +306,49 @@ mod tests {
     }
 
     #[test]
+    fn test_cache_meta_version() {
+        let meta = CacheMeta {
+            version: CACHE_VERSION,
+            pages: vec![CachedPageMeta {
+                index: 0,
+                file_name: "000_page.jpg".to_string(),
+                width: 100,
+                height: 150,
+                is_spread: false,
+            }],
+        };
+        let json = serde_json::to_string(&meta).unwrap();
+        let deserialized: CacheMeta = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.version, CACHE_VERSION);
+        assert_eq!(deserialized.pages.len(), 1);
+    }
+
+    #[test]
     fn test_try_load_cache_valid_meta() {
         let tmp = TempDir::new().unwrap();
         let pages_dir = tmp.path().join("pages");
         std::fs::create_dir_all(&pages_dir).unwrap();
 
-        let metas = vec![
-            CachedPageMeta {
-                index: 0,
-                file_name: "000_page001.png".to_string(),
-                width: 1200,
-                height: 1800,
-                is_spread: false,
-            },
-            CachedPageMeta {
-                index: 1,
-                file_name: "001_page002.png".to_string(),
-                width: 2400,
-                height: 1800,
-                is_spread: true,
-            },
-        ];
-        let json = serde_json::to_string(&metas).unwrap();
+        let meta = CacheMeta {
+            version: CACHE_VERSION,
+            pages: vec![
+                CachedPageMeta {
+                    index: 0,
+                    file_name: "000_page001.jpg".to_string(),
+                    width: 1200,
+                    height: 1800,
+                    is_spread: false,
+                },
+                CachedPageMeta {
+                    index: 1,
+                    file_name: "001_page002.jpg".to_string(),
+                    width: 2400,
+                    height: 1800,
+                    is_spread: true,
+                },
+            ],
+        };
+        let json = serde_json::to_string(&meta).unwrap();
         std::fs::write(pages_dir.join("meta.json"), &json).unwrap();
 
         let result = try_load_cache(&pages_dir);
@@ -352,10 +358,39 @@ mod tests {
         assert_eq!(infos[0].index, 0);
         assert_eq!(infos[0].width, 1200);
         assert!(!infos[0].is_spread);
-        assert!(infos[0].url.contains("000_page001.png"));
+        assert!(infos[0].url.contains("000_page001.jpg"));
         assert_eq!(infos[1].index, 1);
         assert!(infos[1].is_spread);
-        assert!(infos[1].url.contains("001_page002.png"));
+        assert!(infos[1].url.contains("001_page002.jpg"));
+    }
+
+    #[test]
+    fn test_try_load_cache_old_format_rejected() {
+        let tmp = TempDir::new().unwrap();
+        // v1 形式（JSON 配列）は CacheMeta としてパース不可 → None
+        let old_format = r#"[{"index":0,"file_name":"000_page.png","width":100,"height":150,"is_spread":false}]"#;
+        std::fs::write(tmp.path().join("meta.json"), old_format).unwrap();
+        let result = try_load_cache(tmp.path());
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_try_load_cache_wrong_version_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let meta = CacheMeta {
+            version: 999,
+            pages: vec![CachedPageMeta {
+                index: 0,
+                file_name: "000_page.jpg".to_string(),
+                width: 100,
+                height: 150,
+                is_spread: false,
+            }],
+        };
+        let json = serde_json::to_string(&meta).unwrap();
+        std::fs::write(tmp.path().join("meta.json"), &json).unwrap();
+        let result = try_load_cache(tmp.path());
+        assert!(result.is_none());
     }
 
     #[test]
@@ -374,9 +409,14 @@ mod tests {
     }
 
     #[test]
-    fn test_try_load_cache_empty_array() {
+    fn test_try_load_cache_empty_pages() {
         let tmp = TempDir::new().unwrap();
-        std::fs::write(tmp.path().join("meta.json"), "[]").unwrap();
+        let meta = CacheMeta {
+            version: CACHE_VERSION,
+            pages: vec![],
+        };
+        let json = serde_json::to_string(&meta).unwrap();
+        std::fs::write(tmp.path().join("meta.json"), &json).unwrap();
         let result = try_load_cache(tmp.path());
         assert!(result.is_some());
         assert_eq!(result.unwrap().len(), 0);
@@ -421,7 +461,7 @@ mod tests {
         let pages_dir = tmp.path().join("pages");
         std::fs::create_dir_all(&pages_dir).unwrap();
 
-        let result = extract_to_cache(&pages_dir, &*reader, &pages, None);
+        let result = extract_to_cache(&pages_dir, &*reader, &pages);
         assert!(result.is_ok());
         let infos = result.unwrap();
 
@@ -433,9 +473,13 @@ mod tests {
         assert_eq!(infos[0].height, 150);
         assert!(!infos[0].is_spread);
 
-        // Check meta.json was written
+        // Check meta.json was written with version
         let meta_path = pages_dir.join("meta.json");
         assert!(meta_path.exists());
+        let meta_json = std::fs::read_to_string(&meta_path).unwrap();
+        let cache_meta: CacheMeta = serde_json::from_str(&meta_json).unwrap();
+        assert_eq!(cache_meta.version, CACHE_VERSION);
+        assert_eq!(cache_meta.pages.len(), 2);
 
         // Check meta.json is valid and can be loaded by try_load_cache
         let cached_result = try_load_cache(&pages_dir);
@@ -443,7 +487,7 @@ mod tests {
         let cached_infos = cached_result.unwrap();
         assert_eq!(cached_infos.len(), 2);
 
-        // Check page files exist with 3-digit prefix
+        // Check page files exist with original extension
         let entries: Vec<_> = std::fs::read_dir(&pages_dir)
             .unwrap()
             .filter_map(|e| e.ok())
@@ -492,49 +536,5 @@ mod tests {
 
         let loaded = config::load_config_from(&config_file).unwrap();
         assert!((loaded.viewer_settings.moire_reduction - 0.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_resize_page_data_downscale() {
-        let img = image::RgbImage::new(100, 150);
-        let mut png_data = Vec::new();
-        let encoder = image::codecs::png::PngEncoder::new(&mut png_data);
-        image::ImageEncoder::write_image(
-            encoder,
-            img.as_raw(),
-            100,
-            150,
-            image::ExtendedColorType::Rgb8,
-        )
-        .unwrap();
-
-        let result = resize_page_data(&png_data, 100, 150, 75);
-        assert!(result.is_ok());
-        let resized_data = result.unwrap();
-        let (w, h) = thumbnail::get_image_dimensions(&resized_data).unwrap();
-        assert_eq!(h, 75);
-        assert_eq!(w, 50);
-    }
-
-    #[test]
-    fn test_resize_page_data_no_upscale() {
-        let img = image::RgbImage::new(100, 150);
-        let mut png_data = Vec::new();
-        let encoder = image::codecs::png::PngEncoder::new(&mut png_data);
-        image::ImageEncoder::write_image(
-            encoder,
-            img.as_raw(),
-            100,
-            150,
-            image::ExtendedColorType::Rgb8,
-        )
-        .unwrap();
-
-        let result = resize_page_data(&png_data, 100, 150, 300);
-        assert!(result.is_ok());
-        let resized = result.unwrap();
-        let (w, h) = thumbnail::get_image_dimensions(&resized).unwrap();
-        assert_eq!(w, 100);
-        assert_eq!(h, 150);
     }
 }

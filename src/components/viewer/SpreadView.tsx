@@ -1,12 +1,12 @@
-import { convertFileSrc } from '@tauri-apps/api/core';
 import type { PageInfo } from '../../types';
+import WebGLPage from './WebGLPage';
 
 // ============================================================
-// SpreadView — displays one or two pages depending on viewMode
+// SpreadView — displays one or two pages depending on viewMode.
 // Handles: cover page solo, is_spread solo, RTL ordering,
 // and single-page mode.
-// Images are pre-resized by Rust Lanczos3 to display resolution,
-// so <img> renders at near-1:1 with no moiré.
+// Images are rendered via WebGL area-averaging shader (Fant)
+// matching NeeView's BitmapScalingMode.Fant.
 // ============================================================
 
 interface SpreadViewProps {
@@ -15,26 +15,22 @@ interface SpreadViewProps {
   viewMode: 'spread' | 'single';
 }
 
-function pageUrl(page: PageInfo): string {
-  const raw = page.url || '';
-  if (raw.startsWith('http://') || raw.startsWith('https://')) {
-    return raw;
-  }
-  return convertFileSrc(raw);
-}
-
-const soloImgStyle: React.CSSProperties = {
-  maxWidth: '100%',
-  maxHeight: '100%',
-  objectFit: 'contain',
-  display: 'block',
+const soloStyle: React.CSSProperties = {
+  flex: 1,
+  overflow: 'hidden',
 };
 
-const spreadImgStyle: React.CSSProperties = {
-  maxWidth: '50%',
-  maxHeight: '100%',
-  objectFit: 'contain',
-  display: 'block',
+const spreadRootStyle: React.CSSProperties = {
+  flex: 1,
+  display: 'flex',
+  overflow: 'hidden',
+};
+
+const spreadHalfStyle: React.CSSProperties = {
+  flex: 1,
+  height: '100%',
+  minWidth: 0,
+  overflow: 'hidden',
 };
 
 export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewProps) {
@@ -60,21 +56,8 @@ export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewP
   // --- Single page mode ---
   if (viewMode === 'single') {
     return (
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          overflow: 'hidden',
-        }}
-      >
-        <img
-          src={pageUrl(currentPageInfo)}
-          alt={`Page ${currentPage + 1}`}
-          draggable={false}
-          style={soloImgStyle}
-        />
+      <div style={soloStyle}>
+        <WebGLPage page={currentPageInfo} />
       </div>
     );
   }
@@ -90,54 +73,27 @@ export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewP
 
   if (showSolo) {
     return (
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          overflow: 'hidden',
-        }}
-      >
-        <img
-          src={pageUrl(currentPageInfo)}
-          alt={`Page ${currentPage + 1}`}
-          draggable={false}
-          style={soloImgStyle}
-        />
+      <div style={soloStyle}>
+        <WebGLPage page={currentPageInfo} />
       </div>
     );
   }
 
-  // Two-page spread — RTL ordering for manga
+  // Two-page spread — LTR flex: left page on left, right page on right
+  // Each page is pushed toward the center to eliminate the gap
   const leftPage = pages[currentPage + 1];
   const rightPage = currentPageInfo;
 
   return (
-    <div
-      style={{
-        flex: 1,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        direction: 'rtl',
-        overflow: 'hidden',
-      }}
-    >
-      <img
-        src={pageUrl(rightPage)}
-        alt={`Page ${currentPage + 1}`}
-        draggable={false}
-        style={spreadImgStyle}
-      />
+    <div style={spreadRootStyle}>
       {leftPage && (
-        <img
-          src={pageUrl(leftPage)}
-          alt={`Page ${currentPage + 2}`}
-          draggable={false}
-          style={spreadImgStyle}
-        />
+        <div style={spreadHalfStyle}>
+          <WebGLPage page={leftPage} align="right" />
+        </div>
       )}
+      <div style={spreadHalfStyle}>
+        <WebGLPage page={rightPage} align="left" />
+      </div>
     </div>
   );
 }
