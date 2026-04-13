@@ -45,6 +45,27 @@ fn try_load_cache(pages_dir: &std::path::Path) -> Option<Vec<PageInfo>> {
     Some(page_infos)
 }
 
+/// 画像データを target_height に Lanczos3 でリサイズして返す
+/// target_height >= height の場合はリサイズせず元データを返す（アップスケール防止）
+/// 元画像のフォーマットを維持（JPEG→JPEG 95, それ以外→PNG）
+fn resize_page_data(data: &[u8], _width: u32, height: u32, target_height: u32) -> Result<Vec<u8>, AppError> {
+    if target_height >= height {
+        return Ok(data.to_vec());
+    }
+    let img = image::load_from_memory(data)
+        .map_err(|e| AppError::FileIO(format!("画像デコード失敗: {}", e)))?;
+    let resized = img.resize(u32::MAX, target_height, image::imageops::FilterType::Lanczos3);
+    let mut buf = Vec::new();
+    if data.len() >= 2 && data[0] == 0xFF && data[1] == 0xD8 {
+        resized.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Jpeg)
+            .map_err(|e| AppError::FileIO(format!("画像エンコード失敗: {}", e)))?;
+    } else {
+        resized.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+            .map_err(|e| AppError::FileIO(format!("画像エンコード失敗: {}", e)))?;
+    }
+    Ok(buf)
+}
+
 /// アーカイブページをキャッシュディレクトリに展開し、meta.json を書き出す
 fn extract_to_cache(
     pages_dir: &std::path::Path,
@@ -441,5 +462,49 @@ mod tests {
 
         let loaded = config::load_config_from(&config_file).unwrap();
         assert!((loaded.viewer_settings.moire_reduction - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_resize_page_data_downscale() {
+        let img = image::RgbImage::new(100, 150);
+        let mut png_data = Vec::new();
+        let encoder = image::codecs::png::PngEncoder::new(&mut png_data);
+        image::ImageEncoder::write_image(
+            encoder,
+            img.as_raw(),
+            100,
+            150,
+            image::ExtendedColorType::Rgb8,
+        )
+        .unwrap();
+
+        let result = resize_page_data(&png_data, 100, 150, 75);
+        assert!(result.is_ok());
+        let resized_data = result.unwrap();
+        let (w, h) = thumbnail::get_image_dimensions(&resized_data).unwrap();
+        assert_eq!(h, 75);
+        assert_eq!(w, 50);
+    }
+
+    #[test]
+    fn test_resize_page_data_no_upscale() {
+        let img = image::RgbImage::new(100, 150);
+        let mut png_data = Vec::new();
+        let encoder = image::codecs::png::PngEncoder::new(&mut png_data);
+        image::ImageEncoder::write_image(
+            encoder,
+            img.as_raw(),
+            100,
+            150,
+            image::ExtendedColorType::Rgb8,
+        )
+        .unwrap();
+
+        let result = resize_page_data(&png_data, 100, 150, 300);
+        assert!(result.is_ok());
+        let resized = result.unwrap();
+        let (w, h) = thumbnail::get_image_dimensions(&resized).unwrap();
+        assert_eq!(w, 100);
+        assert_eq!(h, 150);
     }
 }
