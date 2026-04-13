@@ -71,6 +71,7 @@ fn extract_to_cache(
     pages_dir: &std::path::Path,
     reader: &dyn archive::ArchiveReader,
     pages: &[archive::ArchivePageEntry],
+    target_height: Option<u32>,
 ) -> Result<Vec<PageInfo>, AppError> {
     let pages_dir_canonical = pages_dir
         .canonicalize()
@@ -107,11 +108,29 @@ fn extract_to_cache(
             }
         }
 
-        std::fs::write(&page_path, &page_data)?;
-
-        let (width, height) = thumbnail::get_image_dimensions(&page_data)
+        // 画像サイズ取得（リサイズ前の元サイズ）
+        let (orig_width, orig_height) = thumbnail::get_image_dimensions(&page_data)
             .unwrap_or((0, 0));
-        let is_spread = thumbnail::is_spread_page(width, height);
+        // is_spread は元画像サイズで判定
+        let is_spread = thumbnail::is_spread_page(orig_width, orig_height);
+
+        // target_height 指定時、元画像が大きければ Lanczos3 リサイズ
+        let final_data = if let Some(th) = target_height {
+            if orig_height > th && orig_height > 0 {
+                resize_page_data(&page_data, orig_width, orig_height, th)
+                    .unwrap_or(page_data)
+            } else {
+                page_data
+            }
+        } else {
+            page_data
+        };
+
+        std::fs::write(&page_path, &final_data)?;
+
+        // リサイズ後の実際のサイズを取得
+        let (width, height) = thumbnail::get_image_dimensions(&final_data)
+            .unwrap_or((orig_width, orig_height));
 
         let url = page_path
             .to_string_lossy()
@@ -147,6 +166,7 @@ fn extract_to_cache(
 pub fn prepare_pages(
     state: State<'_, DbState>,
     archive_id: String,
+    target_height: Option<u32>,
 ) -> Result<Vec<PageInfo>, AppError> {
     let library_path = config::get_library_root()?;
 
@@ -173,6 +193,16 @@ pub fn prepare_pages(
     }
 
     let archive_full_path = library_path.join(&archive_record.file_path);
+
+    // missing フラグ遅延検出
+    if !archive_full_path.exists() {
+        let _ = queries::set_archive_missing(conn, &archive_id, true);
+        return Err(AppError::FileIO(format!(
+            "アーカイブファイルが見つかりません: {}",
+            archive_record.file_path
+        )));
+    }
+
     let reader = archive::open_archive(
         archive_full_path
             .to_str()
@@ -183,7 +213,7 @@ pub fn prepare_pages(
 
     std::fs::create_dir_all(&pages_dir)?;
 
-    match extract_to_cache(&pages_dir, &*reader, &pages) {
+    match extract_to_cache(&pages_dir, &*reader, &pages, target_height) {
         Ok(page_infos) => Ok(page_infos),
         Err(e) => {
             // 展開失敗時はキャッシュを削除
@@ -391,7 +421,7 @@ mod tests {
         let pages_dir = tmp.path().join("pages");
         std::fs::create_dir_all(&pages_dir).unwrap();
 
-        let result = extract_to_cache(&pages_dir, &*reader, &pages);
+        let result = extract_to_cache(&pages_dir, &*reader, &pages, None);
         assert!(result.is_ok());
         let infos = result.unwrap();
 
