@@ -131,7 +131,7 @@ export default function TagEditor({
             display: 'flex',
             flexWrap: 'wrap',
             gap: 8,
-            minHeight: 60,
+            minHeight: 0,
             maxHeight: 300,
             padding: 4,
           }}
@@ -159,19 +159,6 @@ export default function TagEditor({
                   userSelect: 'none',
                 }}
               >
-                {tag.color && (
-                  <span
-                    style={{
-                      display: 'inline-block',
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      background: tag.color,
-                      marginRight: 6,
-                      verticalAlign: 'middle',
-                    }}
-                  />
-                )}
                 {tag.name}
               </div>
             );

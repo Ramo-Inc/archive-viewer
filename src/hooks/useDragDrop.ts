@@ -22,7 +22,7 @@ function isSupportedFile(path: string): boolean {
 }
 
 export function useDragDrop() {
-  const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
+  const debounceTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     const unlisten = listen<{ paths: string[]; position: { x: number; y: number } }>(

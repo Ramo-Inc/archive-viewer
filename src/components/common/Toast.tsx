@@ -17,7 +17,7 @@ const typeStyles: Record<ToastData['type'], { bg: string; border: string }> = {
 
 function ToastItem({ toast }: { toast: ToastData }) {
   const removeToast = useToastStore((s) => s.removeToast);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     timerRef.current = setTimeout(() => {

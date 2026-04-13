@@ -9,9 +9,9 @@ echo ==============================
 echo.
 
 echo [1/3] Installing npm dependencies...
-call npm ci
+call npm install
 if errorlevel 1 (
-    echo ERROR: npm ci failed
+    echo ERROR: npm install failed
     exit /b 1
 )
 echo.

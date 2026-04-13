@@ -82,9 +82,20 @@ export function useKeyboardShortcuts({ onBack, onToggleUI }: ShortcutCallbacks) 
       }
     };
 
+    const handleWheel = (e: WheelEvent) => {
+      const { nextPage, prevPage } = useViewerStore.getState();
+      if (e.deltaY > 0) {
+        nextPage();
+      } else if (e.deltaY < 0) {
+        prevPage();
+      }
+    };
+
     window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('wheel', handleWheel, { passive: true });
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('wheel', handleWheel);
     };
   }, [onBack, onToggleUI]);
 }

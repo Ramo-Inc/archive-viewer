@@ -21,11 +21,12 @@ pub fn run() {
                         .level(log::LevelFilter::Info)
                         .build(),
                 )?;
+            }
 
-                // 開発時はDevToolsを自動で開く
-                if let Some(window) = app.get_webview_window("main") {
-                    window.open_devtools();
-                }
+            // 開発時はDevToolsを自動で開く
+            #[cfg(debug_assertions)]
+            if let Some(window) = app.get_webview_window("main") {
+                window.open_devtools();
             }
 
             // config読み込み → ライブラリパスがあればDB初期化 + 整合性チェック

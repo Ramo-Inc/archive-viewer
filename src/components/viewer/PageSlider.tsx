@@ -45,8 +45,8 @@ export default function PageSlider({
       }}
     >
       <button
-        onClick={onPrev}
-        aria-label="前のページ"
+        onClick={onNext}
+        aria-label="次のページ"
         style={{
           background: 'none',
           border: 'none',
@@ -71,12 +71,13 @@ export default function PageSlider({
           flex: 1,
           accentColor: 'var(--accent)',
           cursor: 'pointer',
+          direction: 'rtl',
         }}
       />
 
       <button
-        onClick={onNext}
-        aria-label="次のページ"
+        onClick={onPrev}
+        aria-label="前のページ"
         style={{
           background: 'none',
           border: 'none',
