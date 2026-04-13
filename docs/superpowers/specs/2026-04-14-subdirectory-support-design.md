@@ -2,6 +2,8 @@
 
 > **Goal:** フォルダとスマートフォルダにExplorerライクなツリー構造（最大3階層）を導入し、展開/折りたたみで操作できるようにする。スマートフォルダは親の検索条件をAND継承する。
 
+> **Rev.2 (2026-04-14):** レビュー指摘を反映。トランザクション安全性、マイグレーション冪等性、フィルタリセット、状態排他制御、ソート順を追加・修正。
+
 ## 現状分析
 
 ### 既に対応済み
@@ -28,17 +30,32 @@
 
 ### 1.1 smart_folders に parent_id 追加
 
-`migrations.rs` に Migration V3 を追加:
+`migrations.rs` に Migration V2 を追加。**冪等性を確保**するため、カラム存在チェックを行ってから ALTER する:
 
-```sql
-ALTER TABLE smart_folders ADD COLUMN parent_id TEXT REFERENCES smart_folders(id) ON DELETE SET NULL;
+```rust
+fn migrate_v2(conn: &Connection) -> Result<(), AppError> {
+    let has_column = conn
+        .prepare("SELECT parent_id FROM smart_folders LIMIT 0")
+        .is_ok();
+    if !has_column {
+        conn.execute_batch(
+            "ALTER TABLE smart_folders ADD COLUMN parent_id TEXT REFERENCES smart_folders(id) ON DELETE SET NULL;",
+        )?;
+    }
+    conn.execute_batch("PRAGMA user_version = 2;")?;
+    Ok(())
+}
 ```
 
-ON DELETE は SET NULL にしておき、実際のカスケード削除はアプリケーションコード側で制御する（SQLiteは ALTER TABLE で FK制約の変更ができないため、folders テーブルも同じ方針で統一）。
+注意: SQLite の ALTER TABLE ADD COLUMN で追加した FK は、SQLite 3.25.0+ では PRAGMA foreign_keys=ON 時に強制されるが、念のためカスケード削除はアプリケーションコード側で制御する。
 
 ### 1.2 既存テーブル変更なし
 
 `folders` テーブルは既に `parent_id` を持つため変更不要。
+
+### 1.3 ソートクエリ修正
+
+`get_folders` と `get_smart_folders` の ORDER BY を `sort_order, name` に変更。`sort_order = 0` が多い状態でも兄弟フォルダが名前順で表示される。
 
 ---
 
@@ -61,16 +78,26 @@ depth 3: ひ孫 ← エラー
 
 ロジック: 指定された `parent_id` から祖先を辿り、深度が2以上なら作成を拒否。
 
+**安全策:**
+- **無限ループ防止**: ループに `MAX_DEPTH = 10` のガードを入れ、データ破損による循環参照でハングしないようにする
+- **存在チェック**: フォルダIDが見つからない場合は `AppError::Validation("フォルダが見つかりません")` を返す（汎用DBエラーではなく明示的メッセージ）
+
 ### 2.3 再帰削除
 
 `delete_folder` と `delete_smart_folder` を変更。削除前に子孫を再帰的に取得し、リーフから順に削除する。
 
+**トランザクション安全性**: 再帰削除全体を `BEGIN` / `COMMIT` で囲み、中途失敗時は `ROLLBACK` する。部分削除によるデータ不整合を防止。
+
+**エラー処理**: 子ID収集で `.filter_map(|r| r.ok())` ではなく `.collect::<Result<Vec<_>, _>>()?` を使い、エラーを黙殺しない。
+
 ```
-delete_folder("parent-id")
+delete_folder_recursive("parent-id")
+  BEGIN;
   → 子フォルダ一覧取得 (parent_id = "parent-id")
-  → 各子に対して再帰呼び出し
+  → 各子に対して再帰呼び出し（内部関数）
   → archive_folders の紐付けも CASCADE で自動削除
   → 最後に自身を削除
+  COMMIT; (失敗時 ROLLBACK)
 ```
 
 ### 2.4 create_smart_folder パラメータ追加
@@ -83,7 +110,7 @@ delete_folder("parent-id")
 `queries.rs` の `get_archive_summaries_filtered` 内、スマートフォルダ分岐を変更:
 
 1. 指定された `smart_folder_id` からスマートフォルダを取得
-2. `parent_id` を辿って全祖先のスマートフォルダを収集（最大2回のDB参照）
+2. `parent_id` を辿って全祖先のスマートフォルダを収集（最大2回のDB参照、**MAX_DEPTH ガード付き**）
 3. 自身 + 全祖先の `conditions` を結合
 4. 全ルールを `match: "all"` (AND) で結合して評価
 
@@ -91,6 +118,10 @@ delete_folder("parent-id")
 → 最終条件: `tag contains "少年" AND rank >= 3`
 
 各スマートフォルダ内部の `match` (all/any) はそのフォルダのルール群に対して適用し、フォルダ間はANDで結合する。
+
+### 2.6 テスト更新
+
+`db/mod.rs` の `test_init_runs_migrations` テスト（line 93: `assert_eq!(version, 1)`）を `CURRENT_VERSION` に更新。
 
 ---
 
@@ -120,16 +151,11 @@ delete_folder("parent-id")
 
 #### ツリー構築ヘルパー
 
-フラットな `Folder[]` からツリー構造を構築するユーティリティ:
+フラットな `Folder[]` からツリー構造を構築するユーティリティ。**`useMemo` でメモ化**し、展開/折りたたみ等の無関係な再レンダリングで再計算しない:
 
 ```typescript
-interface FolderNode {
-  folder: Folder;
-  children: FolderNode[];
-  depth: number;
-}
-
-function buildTree(folders: Folder[]): FolderNode[]
+const folderTree = useMemo(() => buildFolderTree(folders), [folders]);
+const smartFolderTree = useMemo(() => buildSmartFolderTree(smartFolders), [smartFolders]);
 ```
 
 `parent_id === null` のフォルダをルートとし、各フォルダの子を `parent_id` で紐付ける。ソートは `sort_order` → `name` の順。
@@ -154,19 +180,30 @@ function buildTree(folders: Folder[]): FolderNode[]
 
 「サブスマートフォルダを作成」選択時: SmartFolderEditor を `parentId` 付きで開く。
 
-### 3.3 SmartFolderEditor 変更
+### 3.3 フォルダ作成状態の排他制御
+
+ルートフォルダ作成（`creatingFolder`）とサブフォルダ作成（`creatingSubfolderId`）が同時にアクティブにならないよう排他制御する。一方を開始したら他方をリセット。
+
+スマートフォルダも同様: 「+」ボタンでルートレベル作成を開始する際に `creatingSfSubfolderId` をリセットする。
+
+### 3.4 SmartFolderEditor 変更
 
 `SmartFolderEditor.tsx` に `parentId?: string` prop を追加。保存時に `create_smart_folder` へ `parent_id` を渡す。親の条件は表示しない（エディタはそのフォルダ自身の条件のみ編集）。
 
-### 3.4 ドラッグ&ドロップ
+### 3.5 ドラッグ&ドロップ
 
 サブフォルダも既存のドロップゾーンロジックをそのまま使える。ツリー内の各フォルダアイテムにドロップハンドラを設定。変更は不要（フォルダIDベースで動作するため）。
 
-### 3.5 削除確認
+### 3.6 削除後のフィルタリセット
 
-子を持つフォルダ/スマートフォルダの削除時:
-- 確認ダイアログに「サブフォルダも含めて削除されます」と表示
-- 通常の削除確認と区別するため、子の数を表示
+`handleDeleteFolder` / `handleDeleteSmartFolder` を修正。削除後に `fetchFolders()` で最新リストを取得し、**現在のフィルタが指すフォルダがリストに存在しなければフィルタをリセット**する。これにより親フォルダ削除時に子フォルダが選択中でも正しくリセットされる。
+
+```typescript
+// 削除 → fetchFolders() → ストアの最新folders取得 → filter.folder_idがリストにあるか確認
+if (filter.folder_id && !useLibraryStore.getState().folders.find(f => f.id === filter.folder_id)) {
+  resetFilter();
+}
+```
 
 ---
 
@@ -183,8 +220,10 @@ function buildTree(folders: Folder[]): FolderNode[]
 | シナリオ | 挙動 |
 |----------|------|
 | 4階層目のフォルダを作成しようとした | Rust側でエラー返却 → トーストに「最大3階層までです」 |
-| 親フォルダが削除された | 再帰削除で子も消える |
-| 選択中のフォルダが削除された | 既存の挙動と同じ（フィルタリセット） |
+| 親フォルダが削除された | 再帰削除（トランザクション内）で子も消える |
+| 選択中のフォルダ/子孫が削除された | 削除後に存在チェック → フィルタリセット |
+| 深度チェックで存在しないIDが渡された | `AppError::Validation("フォルダが見つかりません: {id}")` |
+| parent_id に循環参照がある（データ破損） | MAX_DEPTH ガードでエラー返却、ハングしない |
 
 ---
 
@@ -194,3 +233,4 @@ function buildTree(folders: Folder[]): FolderNode[]
 - sort_order のドラッグ並べ替え
 - 展開状態の永続化
 - フォルダのパンくずリスト表示
+- DetailPanel のフォルダ表示のツリー化（別タスク）

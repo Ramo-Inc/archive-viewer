@@ -14,12 +14,13 @@
 
 | Action | File | Responsibility |
 |--------|------|---------------|
-| Modify | `src-tauri/src/db/migrations.rs` | V2 migration: smart_folders.parent_id |
+| Modify | `src-tauri/src/db/migrations.rs` | V2 migration: smart_folders.parent_id（冪等性あり） |
+| Modify | `src-tauri/src/db/mod.rs` | テストのバージョンアサーション更新 |
 | Modify | `src-tauri/src/db/models.rs` | SmartFolder に parent_id 追加 |
-| Modify | `src-tauri/src/db/queries.rs` | 深度チェック、再帰削除、条件継承、SF CRUD 更新 |
+| Modify | `src-tauri/src/db/queries.rs` | 深度チェック（ガード付き）、再帰削除（トランザクション）、条件継承、ソート順修正、SF CRUD 更新 |
 | Modify | `src-tauri/src/commands/library.rs` | create_folder/smart_folder に深度チェック、delete にカスケード |
 | Modify | `src/types/index.ts` | SmartFolder に parent_id 追加 |
-| Modify | `src/components/library/Sidebar.tsx` | ツリー表示、展開/折りたたみ、サブフォルダ作成 |
+| Modify | `src/components/library/Sidebar.tsx` | ツリー表示（useMemo）、展開/折りたたみ、サブフォルダ作成、状態排他制御、削除後フィルタリセット |
 | Modify | `src/components/library/SmartFolderEditor.tsx` | parentId prop 追加 |
 
 ---
@@ -104,15 +105,20 @@ pub fn run(conn: &Connection) -> Result<(), AppError> {
 }
 ```
 
-3. Add `migrate_v2` function after `migrate_v1`:
+3. Add `migrate_v2` function after `migrate_v1` (冪等性あり — カラム存在チェック):
 
 ```rust
 fn migrate_v2(conn: &Connection) -> Result<(), AppError> {
-    conn.execute_batch("BEGIN;")?;
-    conn.execute_batch(
-        "ALTER TABLE smart_folders ADD COLUMN parent_id TEXT REFERENCES smart_folders(id) ON DELETE SET NULL;",
-    )?;
-    conn.execute_batch("PRAGMA user_version = 2; COMMIT;")?;
+    // 冪等性: ALTERが成功済みでもuser_versionだけ未更新の場合に対応
+    let has_column = conn
+        .prepare("SELECT parent_id FROM smart_folders LIMIT 0")
+        .is_ok();
+    if !has_column {
+        conn.execute_batch(
+            "ALTER TABLE smart_folders ADD COLUMN parent_id TEXT REFERENCES smart_folders(id) ON DELETE SET NULL;",
+        )?;
+    }
+    conn.execute_batch("PRAGMA user_version = 2;")?;
     Ok(())
 }
 ```
@@ -146,16 +152,24 @@ fn test_migration_is_idempotent() {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: Update `db/mod.rs` test**
 
-Run: `cd src-tauri && cargo test migrations::tests -- --nocapture`
+`src-tauri/src/db/mod.rs` line 93 の `assert_eq!(version, 1)` を更新:
+
+```rust
+assert_eq!(version, 2);
+```
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run: `cd src-tauri && cargo test migrations::tests -- --nocapture && cd src-tauri && cargo test db::tests -- --nocapture`
 Expected: ALL PASS
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src-tauri/src/db/migrations.rs
-git commit -m "feat: add V2 migration for smart_folders.parent_id"
+git add src-tauri/src/db/migrations.rs src-tauri/src/db/mod.rs
+git commit -m "feat: add V2 migration for smart_folders.parent_id (idempotent)"
 ```
 
 ---
@@ -424,14 +438,29 @@ fn test_delete_smart_folder_recursive() {
 Run: `cd src-tauri && cargo test queries::tests::test_get_folder_depth_root -- --nocapture`
 Expected: Compile error — functions don't exist yet
 
-- [ ] **Step 3: Implement depth check, recursive delete, and smart folder with parent_id**
+- [ ] **Step 3: Fix sort order and implement depth check, recursive delete, and smart folder with parent_id**
 
-Add the following functions to `src-tauri/src/db/queries.rs`:
+First, fix sort order for sibling consistency. In `src-tauri/src/db/queries.rs`:
+
+Change `get_folders` (line 171) ORDER BY:
+```rust
+"SELECT id, name, parent_id, sort_order, created_at FROM folders ORDER BY sort_order, name"
+```
+
+Change `get_smart_folders` (line 344, after Task 2 update) ORDER BY:
+```rust
+"SELECT id, name, conditions, sort_order, parent_id, created_at FROM smart_folders ORDER BY sort_order, name"
+```
+
+Then add the following functions to `src-tauri/src/db/queries.rs`:
 
 **After `delete_folder` (line 221), add:**
 
 ```rust
+const MAX_DEPTH_GUARD: i32 = 10;
+
 /// Get the depth of a folder (0 = root, 1 = child, 2 = grandchild)
+/// MAX_DEPTH_GUARD で循環参照時の無限ループを防止
 pub fn get_folder_depth(conn: &Connection, folder_id: &str) -> Result<i32, AppError> {
     let mut depth = 0;
     let mut current_id = folder_id.to_string();
@@ -440,10 +469,18 @@ pub fn get_folder_depth(conn: &Connection, folder_id: &str) -> Result<i32, AppEr
             "SELECT parent_id FROM folders WHERE id = ?1",
             params![current_id],
             |row| row.get(0),
-        ).map_err(|e| AppError::Database(e.to_string()))?;
+        ).map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                AppError::Validation(format!("フォルダが見つかりません: {}", current_id))
+            }
+            other => AppError::Database(other.to_string()),
+        })?;
         match parent_id {
             Some(pid) => {
                 depth += 1;
+                if depth > MAX_DEPTH_GUARD {
+                    return Err(AppError::Validation("フォルダ階層が深すぎます（循環参照の可能性）".to_string()));
+                }
                 current_id = pid;
             }
             None => break,
@@ -452,19 +489,30 @@ pub fn get_folder_depth(conn: &Connection, folder_id: &str) -> Result<i32, AppEr
     Ok(depth)
 }
 
-/// Delete a folder and all its descendants recursively
+/// Delete a folder and all its descendants recursively (トランザクション付き)
 pub fn delete_folder_recursive(conn: &Connection, id: &str) -> Result<(), AppError> {
-    // Find children
+    conn.execute_batch("BEGIN;")?;
+    match delete_folder_recursive_inner(conn, id) {
+        Ok(()) => {
+            conn.execute_batch("COMMIT;")?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK;");
+            Err(e)
+        }
+    }
+}
+
+fn delete_folder_recursive_inner(conn: &Connection, id: &str) -> Result<(), AppError> {
     let mut stmt = conn.prepare("SELECT id FROM folders WHERE parent_id = ?1")?;
     let child_ids: Vec<String> = stmt
         .query_map(params![id], |row| row.get(0))?
-        .filter_map(|r| r.ok())
-        .collect();
-    // Recurse into children
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::Database(e.to_string()))?;
     for child_id in &child_ids {
-        delete_folder_recursive(conn, child_id)?;
+        delete_folder_recursive_inner(conn, child_id)?;
     }
-    // Delete self (archive_folders cleaned up by CASCADE)
     conn.execute("DELETE FROM folders WHERE id = ?1", params![id])?;
     Ok(())
 }
@@ -508,6 +556,7 @@ pub fn create_smart_folder_with_parent(
 
 ```rust
 /// Get the depth of a smart folder (0 = root, 1 = child, 2 = grandchild)
+/// MAX_DEPTH_GUARD で循環参照時の無限ループを防止
 pub fn get_smart_folder_depth(conn: &Connection, sf_id: &str) -> Result<i32, AppError> {
     let mut depth = 0;
     let mut current_id = sf_id.to_string();
@@ -516,10 +565,18 @@ pub fn get_smart_folder_depth(conn: &Connection, sf_id: &str) -> Result<i32, App
             "SELECT parent_id FROM smart_folders WHERE id = ?1",
             params![current_id],
             |row| row.get(0),
-        ).map_err(|e| AppError::Database(e.to_string()))?;
+        ).map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                AppError::Validation(format!("スマートフォルダが見つかりません: {}", current_id))
+            }
+            other => AppError::Database(other.to_string()),
+        })?;
         match parent_id {
             Some(pid) => {
                 depth += 1;
+                if depth > MAX_DEPTH_GUARD {
+                    return Err(AppError::Validation("スマートフォルダ階層が深すぎます（循環参照の可能性）".to_string()));
+                }
                 current_id = pid;
             }
             None => break,
@@ -528,15 +585,29 @@ pub fn get_smart_folder_depth(conn: &Connection, sf_id: &str) -> Result<i32, App
     Ok(depth)
 }
 
-/// Delete a smart folder and all its descendants recursively
+/// Delete a smart folder and all its descendants recursively (トランザクション付き)
 pub fn delete_smart_folder_recursive(conn: &Connection, id: &str) -> Result<(), AppError> {
+    conn.execute_batch("BEGIN;")?;
+    match delete_smart_folder_recursive_inner(conn, id) {
+        Ok(()) => {
+            conn.execute_batch("COMMIT;")?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK;");
+            Err(e)
+        }
+    }
+}
+
+fn delete_smart_folder_recursive_inner(conn: &Connection, id: &str) -> Result<(), AppError> {
     let mut stmt = conn.prepare("SELECT id FROM smart_folders WHERE parent_id = ?1")?;
     let child_ids: Vec<String> = stmt
         .query_map(params![id], |row| row.get(0))?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::Database(e.to_string()))?;
     for child_id in &child_ids {
-        delete_smart_folder_recursive(conn, child_id)?;
+        delete_smart_folder_recursive_inner(conn, child_id)?;
     }
     conn.execute("DELETE FROM smart_folders WHERE id = ?1", params![id])?;
     Ok(())
@@ -621,13 +692,19 @@ In `src-tauri/src/db/queries.rs`, add a helper function before `get_archive_summ
 
 ```rust
 /// Collect conditions from a smart folder and all its ancestors (AND chain)
+/// MAX_DEPTH_GUARD で循環参照時の無限ループを防止
 fn collect_smart_folder_conditions(
     conn: &Connection,
     sf_id: &str,
 ) -> Result<Vec<SmartFolderConditions>, AppError> {
     let mut all_conditions = Vec::new();
     let mut current_id = Some(sf_id.to_string());
+    let mut guard = 0;
     while let Some(id) = current_id {
+        guard += 1;
+        if guard > MAX_DEPTH_GUARD {
+            return Err(AppError::Validation("スマートフォルダの祖先チェーンが深すぎます".to_string()));
+        }
         let sf = get_smart_folder_by_id(conn, &id)?;
         let parsed: SmartFolderConditions = serde_json::from_str(&sf.conditions)?;
         all_conditions.push(parsed);
@@ -860,7 +937,14 @@ This is the largest frontend task. The Sidebar currently renders flat lists. We'
 
 - [ ] **Step 1: Add tree-building types and utility at module scope**
 
-At the top of `src/components/library/Sidebar.tsx` (after imports, before SidebarItem), add:
+At the top of `src/components/library/Sidebar.tsx` (after imports, before SidebarItem), add.
+Import `useMemo` を既存の `import { useState, useCallback, useRef, useEffect }` に追加:
+
+```typescript
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+```
+
+Then add the tree utilities:
 
 ```typescript
 // --- Tree building utility ---
@@ -880,24 +964,21 @@ function buildFolderTree(folders: Folder[]): FolderNode[] {
   const map = new Map<string, FolderNode>();
   const roots: FolderNode[] = [];
 
-  // Create nodes
   for (const f of folders) {
     map.set(f.id, { folder: f, children: [], depth: 0 });
   }
 
-  // Build tree
   for (const f of folders) {
     const node = map.get(f.id)!;
     if (f.parent_id && map.has(f.parent_id)) {
       const parent = map.get(f.parent_id)!;
-      node.depth = parent.depth + 1;
       parent.children.push(node);
     } else {
       roots.push(node);
     }
   }
 
-  // Fix depths for deeper nesting
+  // Set correct depths recursively
   function setDepths(nodes: FolderNode[], d: number) {
     for (const n of nodes) {
       n.depth = d;
@@ -921,7 +1002,6 @@ function buildSmartFolderTree(smartFolders: SmartFolder[]): SmartFolderNode[] {
     const node = map.get(sf.id)!;
     if (sf.parent_id && map.has(sf.parent_id)) {
       const parent = map.get(sf.parent_id)!;
-      node.depth = parent.depth + 1;
       parent.children.push(node);
     } else {
       roots.push(node);
@@ -940,11 +1020,15 @@ function buildSmartFolderTree(smartFolders: SmartFolder[]): SmartFolderNode[] {
 }
 ```
 
-- [ ] **Step 2: Add expand/collapse state to Sidebar component**
+- [ ] **Step 2: Add useMemo tree building and expand/collapse state to Sidebar component**
 
 Inside `export default function Sidebar()`, after the existing state declarations (line 211), add:
 
 ```typescript
+// Tree building (memoized — only recomputes when folders/smartFolders change)
+const folderTree = useMemo(() => buildFolderTree(folders), [folders]);
+const smartFolderTree = useMemo(() => buildSmartFolderTree(smartFolders), [smartFolders]);
+
 const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(new Set());
 const [expandedSmartFolderIds, setExpandedSmartFolderIds] = useState<Set<string>>(new Set());
 
@@ -1141,9 +1225,8 @@ function FolderItem({
 In the Sidebar component's JSX, replace the folder list section (lines 477-492):
 
 ```typescript
-      {/* Folder tree */}
+      {/* Folder tree (useMemo済み) */}
       {(() => {
-        const tree = buildFolderTree(folders);
         function renderFolderNodes(nodes: FolderNode[]): React.ReactNode {
           return nodes.map((node) => (
             <div key={node.folder.id}>
@@ -1168,7 +1251,7 @@ In the Sidebar component's JSX, replace the folder list section (lines 477-492):
             </div>
           ));
         }
-        return renderFolderNodes(tree);
+        return renderFolderNodes(folderTree);
       })()}
 ```
 
@@ -1177,9 +1260,8 @@ In the Sidebar component's JSX, replace the folder list section (lines 477-492):
 Replace the smart folder list section (lines 506-516):
 
 ```typescript
-      {/* Smart folder tree */}
+      {/* Smart folder tree (useMemo済み) */}
       {(() => {
-        const tree = buildSmartFolderTree(smartFolders);
         function renderSmartFolderNodes(nodes: SmartFolderNode[]): React.ReactNode {
           return nodes.map((node) => {
             const sf = node.smartFolder;
@@ -1248,7 +1330,7 @@ Replace the smart folder list section (lines 506-516):
             );
           });
         }
-        return renderSmartFolderNodes(tree);
+        return renderSmartFolderNodes(smartFolderTree);
       })()}
 ```
 
@@ -1271,7 +1353,7 @@ git commit -m "feat: tree rendering with expand/collapse for folders and smart f
 **Files:**
 - Modify: `src/components/library/Sidebar.tsx`
 
-- [ ] **Step 1: Add state for subfolder creation**
+- [ ] **Step 1: Add state for subfolder creation (with mutual exclusion helpers)**
 
 In the Sidebar component, after `newFolderInputRef` (line 213), add:
 
@@ -1279,6 +1361,34 @@ In the Sidebar component, after `newFolderInputRef` (line 213), add:
 const [creatingSubfolderId, setCreatingSubfolderId] = useState<string | null>(null);
 const [newSubfolderName, setNewSubfolderName] = useState('');
 const [creatingSfSubfolderId, setCreatingSfSubfolderId] = useState<string | null>(null);
+
+// 状態排他制御: ルート作成とサブフォルダ作成が同時にアクティブにならないようにする
+const startRootFolderCreate = useCallback(() => {
+  setCreatingFolder(true);
+  setNewFolderName('');
+  setCreatingSubfolderId(null);
+  setNewSubfolderName('');
+}, []);
+
+const startSubfolderCreate = useCallback((parentId: string) => {
+  setCreatingFolder(false);
+  setNewFolderName('');
+  setCreatingSubfolderId(parentId);
+  setNewSubfolderName('');
+  setExpandedFolderIds((prev) => new Set([...prev, parentId]));
+}, []);
+```
+
+Also update the folder section "+" button (line 444) to use `startRootFolderCreate`:
+
+```typescript
+onClick={startRootFolderCreate}
+```
+
+And update the smart folder "+" button (line 498-499) to clear `creatingSfSubfolderId`:
+
+```typescript
+onClick={() => { setEditingSmartFolder(undefined); setCreatingSfSubfolderId(null); setShowSmartFolderEditor(true); }}
 ```
 
 - [ ] **Step 2: Add subfolder create handler**
@@ -1329,11 +1439,7 @@ const handleFolderContextMenu = useCallback(
     if (depth < 2) {
       items.push({
         label: 'サブフォルダを作成',
-        onClick: () => {
-          setCreatingSubfolderId(folder.id);
-          setNewSubfolderName('');
-          setExpandedFolderIds((prev) => new Set([...prev, folder.id]));
-        },
+        onClick: () => startSubfolderCreate(folder.id),
       });
     }
     items.push({ label: '名前変更', onClick: () => setEditingFolderId(folder.id) });
@@ -1449,7 +1555,52 @@ const handleSmartFolderContextMenu = useCallback(
 );
 ```
 
-- [ ] **Step 6: Pass parentId to SmartFolderEditor**
+- [ ] **Step 6: Fix handleDeleteFolder/handleDeleteSmartFolder to reset filter when child was selected**
+
+Replace `handleDeleteFolder` (Sidebar.tsx lines 282-296) to check if the active filter's folder still exists after deletion:
+
+```typescript
+const handleDeleteFolder = useCallback(
+  async (folderId: string) => {
+    try {
+      await tauriInvoke('delete_folder', { id: folderId });
+      await fetchFolders();
+      // 削除されたフォルダまたはその子孫が選択中ならフィルタリセット
+      const currentFolders = useLibraryStore.getState().folders;
+      if (filter.folder_id && !currentFolders.find(f => f.id === filter.folder_id)) {
+        resetFilter();
+      }
+      addToast('フォルダを削除しました', 'success');
+    } catch (e) {
+      addToast(`フォルダ削除失敗: ${String(e)}`, 'error');
+    }
+  },
+  [fetchFolders, filter.folder_id, resetFilter, addToast],
+);
+```
+
+Similarly update `handleDeleteSmartFolder`:
+
+```typescript
+const handleDeleteSmartFolder = useCallback(
+  async (sfId: string) => {
+    try {
+      await tauriInvoke('delete_smart_folder', { id: sfId });
+      await fetchSmartFolders();
+      const currentSfs = useLibraryStore.getState().smartFolders;
+      if (filter.smart_folder_id && !currentSfs.find(sf => sf.id === filter.smart_folder_id)) {
+        resetFilter();
+      }
+      addToast('スマートフォルダを削除しました', 'success');
+    } catch (e) {
+      addToast(`スマートフォルダ削除失敗: ${String(e)}`, 'error');
+    }
+  },
+  [fetchSmartFolders, filter.smart_folder_id, resetFilter, addToast],
+);
+```
+
+- [ ] **Step 7: Pass parentId to SmartFolderEditor**
 
 Update the SmartFolderEditor render at the bottom of Sidebar's JSX:
 
@@ -1463,16 +1614,16 @@ Update the SmartFolderEditor render at the bottom of Sidebar's JSX:
       )}
 ```
 
-- [ ] **Step 7: Verify TypeScript compiles**
+- [ ] **Step 8: Verify TypeScript compiles**
 
 Run: `npx tsc --noEmit`
 Expected: Errors about SmartFolderEditor not accepting `parentId` prop (will fix in Task 9)
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add src/components/library/Sidebar.tsx
-git commit -m "feat: context menu subfolder creation and inline input"
+git commit -m "feat: context menu subfolder creation, state exclusion, filter reset on delete"
 ```
 
 ---
@@ -1542,7 +1693,7 @@ git commit -m "feat: SmartFolderEditor supports parentId for sub-smart-folders"
 **Files:**
 - Test: `src-tauri/src/db/queries.rs` (tests section)
 
-- [ ] **Step 1: Write integration test for 3-level depth rejection**
+- [ ] **Step 1: Write integration tests**
 
 In `src-tauri/src/db/queries.rs` tests:
 
@@ -1553,11 +1704,7 @@ fn test_create_folder_max_depth_3() {
     let root = create_folder(&conn, "Level0", None).unwrap();
     let child = create_folder(&conn, "Level1", Some(&root.id)).unwrap();
     let grandchild = create_folder(&conn, "Level2", Some(&child.id)).unwrap();
-    // Depth of grandchild is 2
     assert_eq!(get_folder_depth(&conn, &grandchild.id).unwrap(), 2);
-    // Creating a great-grandchild should be blocked at command level,
-    // but at query level the depth check just returns the number.
-    // Verify depth is correct for validation.
     assert_eq!(get_folder_depth(&conn, &child.id).unwrap(), 1);
 }
 
@@ -1587,6 +1734,64 @@ fn test_delete_folder_recursive_with_archives() {
     // Archive still exists (only junction row deleted)
     let a = get_archive_by_id(&conn, "a1").unwrap();
     assert_eq!(a.id, "a1");
+}
+
+#[test]
+fn test_delete_folder_recursive_preserves_archive_in_other_folder() {
+    let conn = setup_db();
+    let folder_a = create_folder(&conn, "FolderA", None).unwrap();
+    let folder_b = create_folder(&conn, "FolderB", None).unwrap();
+
+    let archive = make_test_archive("a1", "Test");
+    insert_archive(&conn, &archive).unwrap();
+    move_archives_to_folder(&conn, &["a1".to_string()], &folder_a.id).unwrap();
+    move_archives_to_folder(&conn, &["a1".to_string()], &folder_b.id).unwrap();
+
+    delete_folder_recursive(&conn, &folder_a.id).unwrap();
+
+    // Archive still in folder_b
+    let folders = get_folders_for_archive(&conn, "a1").unwrap();
+    assert_eq!(folders.len(), 1);
+    assert_eq!(folders[0].id, folder_b.id);
+}
+
+#[test]
+fn test_smart_folder_3_level_condition_inheritance() {
+    let conn = setup_db();
+
+    let a1 = make_test_archive("a1", "Manga1");
+    insert_archive(&conn, &a1).unwrap();
+    update_archive(&conn, "a1", &ArchiveUpdate { title: None, rank: Some(5), memo: None, is_read: None }).unwrap();
+    let tag = create_tag(&conn, "shounen").unwrap();
+    set_archive_tags(&conn, "a1", &[tag.id.clone()]).unwrap();
+
+    let a2 = make_test_archive("a2", "Manga2");
+    insert_archive(&conn, &a2).unwrap();
+    update_archive(&conn, "a2", &ArchiveUpdate { title: None, rank: Some(5), memo: None, is_read: None }).unwrap();
+    // a2 has no tags
+
+    // Grandparent: tag contains "shounen"
+    let gp = create_smart_folder_with_parent(
+        &conn, "GP", r#"{"match":"all","rules":[{"field":"tag","op":"contains","value":"shounen"}]}"#, None,
+    ).unwrap();
+    // Parent: rank >= 3
+    let parent = create_smart_folder_with_parent(
+        &conn, "Parent", r#"{"match":"all","rules":[{"field":"rank","op":"gte","value":3}]}"#, Some(&gp.id),
+    ).unwrap();
+    // Child: rank <= 5 (should AND all three: tag shounen AND rank >= 3 AND rank <= 5)
+    let child = create_smart_folder_with_parent(
+        &conn, "Child", r#"{"match":"all","rules":[{"field":"rank","op":"lte","value":5}]}"#, Some(&parent.id),
+    ).unwrap();
+
+    let filter = ArchiveFilter {
+        smart_folder_id: Some(child.id),
+        folder_id: None, preset: None, sort_by: None, sort_order: None,
+        filter_tags: None, filter_min_rank: None, search_query: None,
+    };
+    let results = get_archive_summaries_filtered(&conn, &filter).unwrap();
+    // Only a1 matches (has shounen tag + rank 5). a2 has rank 5 but no shounen tag.
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].id, "a1");
 }
 ```
 
