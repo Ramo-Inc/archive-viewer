@@ -1505,4 +1505,100 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "a1");
     }
+
+    #[test]
+    fn test_create_folder_max_depth_3() {
+        let conn = setup_db();
+        let root = create_folder(&conn, "Level0", None).unwrap();
+        let child = create_folder(&conn, "Level1", Some(&root.id)).unwrap();
+        let grandchild = create_folder(&conn, "Level2", Some(&child.id)).unwrap();
+        assert_eq!(get_folder_depth(&conn, &grandchild.id).unwrap(), 2);
+        assert_eq!(get_folder_depth(&conn, &child.id).unwrap(), 1);
+    }
+
+    #[test]
+    fn test_smart_folder_3_level_hierarchy() {
+        let conn = setup_db();
+        let root = create_smart_folder_with_parent(&conn, "L0", r#"{"match":"all","rules":[]}"#, None).unwrap();
+        let child = create_smart_folder_with_parent(&conn, "L1", r#"{"match":"all","rules":[]}"#, Some(&root.id)).unwrap();
+        let grandchild = create_smart_folder_with_parent(&conn, "L2", r#"{"match":"all","rules":[]}"#, Some(&child.id)).unwrap();
+        assert_eq!(get_smart_folder_depth(&conn, &grandchild.id).unwrap(), 2);
+    }
+
+    #[test]
+    fn test_delete_folder_recursive_with_archives() {
+        let conn = setup_db();
+        let root = create_folder(&conn, "Root", None).unwrap();
+        let child = create_folder(&conn, "Child", Some(&root.id)).unwrap();
+
+        let archive = make_test_archive("a1", "Test");
+        insert_archive(&conn, &archive).unwrap();
+        move_archives_to_folder(&conn, &["a1".to_string()], &child.id).unwrap();
+
+        delete_folder_recursive(&conn, &root.id).unwrap();
+
+        // Folders gone
+        assert!(get_folders(&conn).unwrap().is_empty());
+        // Archive still exists (only junction row deleted via CASCADE)
+        let a = get_archive_by_id(&conn, "a1").unwrap();
+        assert_eq!(a.id, "a1");
+    }
+
+    #[test]
+    fn test_delete_folder_recursive_preserves_archive_in_other_folder() {
+        let conn = setup_db();
+        let folder_a = create_folder(&conn, "FolderA", None).unwrap();
+        let folder_b = create_folder(&conn, "FolderB", None).unwrap();
+
+        let archive = make_test_archive("a1", "Test");
+        insert_archive(&conn, &archive).unwrap();
+        move_archives_to_folder(&conn, &["a1".to_string()], &folder_a.id).unwrap();
+        move_archives_to_folder(&conn, &["a1".to_string()], &folder_b.id).unwrap();
+
+        delete_folder_recursive(&conn, &folder_a.id).unwrap();
+
+        // Archive still in folder_b
+        let folders = get_folders_for_archive(&conn, "a1").unwrap();
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders[0].id, folder_b.id);
+    }
+
+    #[test]
+    fn test_smart_folder_3_level_condition_inheritance() {
+        let conn = setup_db();
+
+        let a1 = make_test_archive("a1", "Manga1");
+        insert_archive(&conn, &a1).unwrap();
+        update_archive(&conn, "a1", &ArchiveUpdate { title: None, rank: Some(5), memo: None, is_read: None }).unwrap();
+        let tag = create_tag(&conn, "shounen").unwrap();
+        set_archive_tags(&conn, "a1", &[tag.id.clone()]).unwrap();
+
+        let a2 = make_test_archive("a2", "Manga2");
+        insert_archive(&conn, &a2).unwrap();
+        update_archive(&conn, "a2", &ArchiveUpdate { title: None, rank: Some(5), memo: None, is_read: None }).unwrap();
+        // a2 has no tags
+
+        // Grandparent: tag contains "shounen"
+        let gp = create_smart_folder_with_parent(
+            &conn, "GP", r#"{"match":"all","rules":[{"field":"tag","op":"contains","value":"shounen"}]}"#, None,
+        ).unwrap();
+        // Parent: rank >= 3
+        let parent = create_smart_folder_with_parent(
+            &conn, "Parent", r#"{"match":"all","rules":[{"field":"rank","op":"gte","value":3}]}"#, Some(&gp.id),
+        ).unwrap();
+        // Child: rank <= 5 (should AND all three: tag shounen AND rank >= 3 AND rank <= 5)
+        let child = create_smart_folder_with_parent(
+            &conn, "Child", r#"{"match":"all","rules":[{"field":"rank","op":"lte","value":5}]}"#, Some(&parent.id),
+        ).unwrap();
+
+        let filter = ArchiveFilter {
+            smart_folder_id: Some(child.id),
+            folder_id: None, preset: None, sort_by: None, sort_order: None,
+            filter_tags: None, filter_min_rank: None, search_query: None,
+        };
+        let results = get_archive_summaries_filtered(&conn, &filter).unwrap();
+        // Only a1 matches (has shounen tag + rank 5). a2 has rank 5 but no shounen tag.
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "a1");
+    }
 }
