@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useLibraryStore } from '../../stores/libraryStore';
 import { useToastStore } from '../../stores/toastStore';
 import { tauriInvoke } from '../../hooks/useTauriCommand';
@@ -11,6 +11,77 @@ import type { Folder, SmartFolder } from '../../types';
 // Now includes: folder CRUD, smart folder CRUD via modals,
 // context menus, and drag-drop targets for archive-to-folder.
 // ============================================================
+
+// --- Tree building utility ---
+interface FolderNode {
+  folder: Folder;
+  children: FolderNode[];
+  depth: number;
+}
+
+interface SmartFolderNode {
+  smartFolder: SmartFolder;
+  children: SmartFolderNode[];
+  depth: number;
+}
+
+function buildFolderTree(folders: Folder[]): FolderNode[] {
+  const map = new Map<string, FolderNode>();
+  const roots: FolderNode[] = [];
+
+  for (const f of folders) {
+    map.set(f.id, { folder: f, children: [], depth: 0 });
+  }
+
+  for (const f of folders) {
+    const node = map.get(f.id)!;
+    if (f.parent_id && map.has(f.parent_id)) {
+      const parent = map.get(f.parent_id)!;
+      parent.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+
+  function setDepths(nodes: FolderNode[], d: number) {
+    for (const n of nodes) {
+      n.depth = d;
+      setDepths(n.children, d + 1);
+    }
+  }
+  setDepths(roots, 0);
+
+  return roots;
+}
+
+function buildSmartFolderTree(smartFolders: SmartFolder[]): SmartFolderNode[] {
+  const map = new Map<string, SmartFolderNode>();
+  const roots: SmartFolderNode[] = [];
+
+  for (const sf of smartFolders) {
+    map.set(sf.id, { smartFolder: sf, children: [], depth: 0 });
+  }
+
+  for (const sf of smartFolders) {
+    const node = map.get(sf.id)!;
+    if (sf.parent_id && map.has(sf.parent_id)) {
+      const parent = map.get(sf.parent_id)!;
+      parent.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+
+  function setDepths(nodes: SmartFolderNode[], d: number) {
+    for (const n of nodes) {
+      n.depth = d;
+      setDepths(n.children, d + 1);
+    }
+  }
+  setDepths(roots, 0);
+
+  return roots;
+}
 
 interface SidebarItemProps {
   label: string;
@@ -64,10 +135,14 @@ function SidebarItem({ label, icon, active, onClick, onContextMenu, dataFolderId
 
 interface FolderItemProps {
   folder: Folder;
+  depth: number;
+  hasChildren: boolean;
+  isExpanded: boolean;
   activeFolderId: string | null | undefined;
   isEditing: boolean;
   isDropTarget: boolean;
   onSelect: (id: string | null) => void;
+  onToggleExpand: (id: string) => void;
   onContextMenu: (e: React.MouseEvent, folder: Folder) => void;
   onRenameCommit: (id: string, newName: string) => void;
   onRenameCancel: () => void;
@@ -78,10 +153,14 @@ interface FolderItemProps {
 
 function FolderItem({
   folder,
+  depth,
+  hasChildren,
+  isExpanded,
   activeFolderId,
   isEditing,
   isDropTarget,
   onSelect,
+  onToggleExpand,
   onContextMenu,
   onRenameCommit,
   onRenameCancel,
@@ -100,6 +179,8 @@ function FolderItem({
     }
   }, [isEditing, folder.name]);
 
+  const indent = 12 + depth * 16;
+
   const commitRename = () => {
     const trimmed = editName.trim();
     if (trimmed && trimmed !== folder.name) {
@@ -111,7 +192,7 @@ function FolderItem({
 
   if (isEditing) {
     return (
-      <div style={{ padding: '4px 10px' }}>
+      <div style={{ padding: '4px 10px', paddingLeft: indent }}>
         <input
           ref={inputRef}
           value={editName}
@@ -155,8 +236,9 @@ function FolderItem({
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 8,
+        gap: 4,
         padding: '6px 10px',
+        paddingLeft: indent,
         borderRadius: 4,
         cursor: 'pointer',
         fontSize: 13,
@@ -182,7 +264,13 @@ function FolderItem({
             activeFolderId === folder.id ? 'var(--bg-hover)' : 'transparent';
       }}
     >
-      <span style={{ fontSize: 14, width: 18, textAlign: 'center' }}>📁</span>
+      <span
+        onClick={(e) => { e.stopPropagation(); if (hasChildren) onToggleExpand(folder.id); }}
+        style={{ width: 16, fontSize: 10, textAlign: 'center', cursor: hasChildren ? 'pointer' : 'default', color: 'var(--text-dim)', flexShrink: 0, userSelect: 'none' }}
+      >
+        {hasChildren ? (isExpanded ? '\u25BC' : '\u25B6') : ''}
+      </span>
+      <span style={{ fontSize: 14, width: 18, textAlign: 'center', flexShrink: 0 }}>📁</span>
       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {folder.name}
       </span>
@@ -209,6 +297,36 @@ export default function Sidebar() {
   const [dropTargetFolderId, setDropTargetFolderId] = useState<string | null>(null);
   const [showSmartFolderEditor, setShowSmartFolderEditor] = useState(false);
   const [editingSmartFolder, setEditingSmartFolder] = useState<SmartFolder | undefined>(undefined);
+
+  const folderTree = useMemo(() => buildFolderTree(folders), [folders]);
+  const smartFolderTree = useMemo(() => buildSmartFolderTree(smartFolders), [smartFolders]);
+
+  const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(new Set());
+  const [expandedSmartFolderIds, setExpandedSmartFolderIds] = useState<Set<string>>(new Set());
+
+  const toggleFolderExpand = useCallback((folderId: string) => {
+    setExpandedFolderIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(folderId)) {
+        next.delete(folderId);
+      } else {
+        next.add(folderId);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleSmartFolderExpand = useCallback((sfId: string) => {
+    setExpandedSmartFolderIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sfId)) {
+        next.delete(sfId);
+      } else {
+        next.add(sfId);
+      }
+      return next;
+    });
+  }, []);
 
   const newFolderInputRef = useRef<HTMLInputElement>(null);
 
@@ -474,22 +592,33 @@ export default function Sidebar() {
         </div>
       )}
 
-      {folders.map((folder) => (
-        <FolderItem
-          key={folder.id}
-          folder={folder}
-          activeFolderId={filter.folder_id}
-          isEditing={editingFolderId === folder.id}
-          isDropTarget={dropTargetFolderId === folder.id}
-          onSelect={handleFolderSelect}
-          onContextMenu={handleFolderContextMenu}
-          onRenameCommit={handleRenameCommit}
-          onRenameCancel={() => setEditingFolderId(null)}
-          onDragOver={handleFolderDragOver}
-          onDragLeave={handleFolderDragLeave}
-          onDrop={handleFolderDrop}
-        />
-      ))}
+      {(() => {
+        function renderFolderNodes(nodes: FolderNode[]): React.ReactNode {
+          return nodes.map((node) => (
+            <div key={node.folder.id}>
+              <FolderItem
+                folder={node.folder}
+                depth={node.depth}
+                hasChildren={node.children.length > 0}
+                isExpanded={expandedFolderIds.has(node.folder.id)}
+                activeFolderId={filter.folder_id}
+                isEditing={editingFolderId === node.folder.id}
+                isDropTarget={dropTargetFolderId === node.folder.id}
+                onSelect={handleFolderSelect}
+                onToggleExpand={toggleFolderExpand}
+                onContextMenu={handleFolderContextMenu}
+                onRenameCommit={handleRenameCommit}
+                onRenameCancel={() => setEditingFolderId(null)}
+                onDragOver={handleFolderDragOver}
+                onDragLeave={handleFolderDragLeave}
+                onDrop={handleFolderDrop}
+              />
+              {expandedFolderIds.has(node.folder.id) && node.children.length > 0 && renderFolderNodes(node.children)}
+            </div>
+          ));
+        }
+        return renderFolderNodes(folderTree);
+      })()}
 
       {/* Smart folder section — always visible */}
       <div style={sectionTitleStyle}>
@@ -503,17 +632,77 @@ export default function Sidebar() {
         </button>
       </div>
 
-      {smartFolders.map((sf) => (
-        <SidebarItem
-          key={sf.id}
-          label={sf.name}
-          icon="🔍"
-          active={filter.smart_folder_id === sf.id}
-          onClick={() => handleSmartFolderSelect(sf.id)}
-          onContextMenu={(e) => handleSmartFolderContextMenu(e, sf)}
-          dataFolderId={`smart-${sf.id}`}
-        />
-      ))}
+      {(() => {
+        function renderSmartFolderNodes(nodes: SmartFolderNode[]): React.ReactNode {
+          return nodes.map((node) => {
+            const sf = node.smartFolder;
+            const hasChildren = node.children.length > 0;
+            const isExpanded = expandedSmartFolderIds.has(sf.id);
+            const indent = 12 + node.depth * 16;
+            return (
+              <div key={sf.id}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleSmartFolderSelect(sf.id)}
+                  onContextMenu={(e) => handleSmartFolderContextMenu(e, sf)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleSmartFolderSelect(sf.id);
+                    }
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '6px 10px',
+                    paddingLeft: indent,
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    background: filter.smart_folder_id === sf.id ? 'var(--bg-hover)' : 'transparent',
+                    color: filter.smart_folder_id === sf.id ? 'var(--text-primary)' : 'var(--text-secondary)',
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (filter.smart_folder_id !== sf.id)
+                      e.currentTarget.style.background = 'var(--bg-card)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background =
+                      filter.smart_folder_id === sf.id ? 'var(--bg-hover)' : 'transparent';
+                  }}
+                >
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (hasChildren) toggleSmartFolderExpand(sf.id);
+                    }}
+                    style={{
+                      width: 16,
+                      fontSize: 10,
+                      textAlign: 'center',
+                      cursor: hasChildren ? 'pointer' : 'default',
+                      color: 'var(--text-dim)',
+                      flexShrink: 0,
+                      userSelect: 'none',
+                    }}
+                  >
+                    {hasChildren ? (isExpanded ? '\u25BC' : '\u25B6') : ''}
+                  </span>
+                  <span style={{ fontSize: 14, width: 18, textAlign: 'center', flexShrink: 0 }}>🔍</span>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {sf.name}
+                  </span>
+                </div>
+                {isExpanded && hasChildren && renderSmartFolderNodes(node.children)}
+              </div>
+            );
+          });
+        }
+        return renderSmartFolderNodes(smartFolderTree);
+      })()}
 
       {/* Bottom spacer */}
       <div style={{ flex: 1 }} />
