@@ -535,6 +535,26 @@ fn delete_smart_folder_recursive_inner(conn: &Connection, id: &str) -> Result<()
 
 // === Filtered Queries (E2-9) ===
 
+fn collect_smart_folder_conditions(
+    conn: &Connection,
+    sf_id: &str,
+) -> Result<Vec<SmartFolderConditions>, AppError> {
+    let mut all_conditions = Vec::new();
+    let mut current_id = Some(sf_id.to_string());
+    let mut guard = 0;
+    while let Some(id) = current_id {
+        guard += 1;
+        if guard > MAX_DEPTH_GUARD {
+            return Err(AppError::Validation("スマートフォルダの祖先チェーンが深すぎます".to_string()));
+        }
+        let sf = get_smart_folder_by_id(conn, &id)?;
+        let parsed: SmartFolderConditions = serde_json::from_str(&sf.conditions)?;
+        all_conditions.push(parsed);
+        current_id = sf.parent_id;
+    }
+    Ok(all_conditions)
+}
+
 pub fn get_archive_summaries_filtered(
     conn: &Connection,
     filter: &ArchiveFilter,
@@ -555,49 +575,55 @@ pub fn get_archive_summaries_filtered(
         param_idx += 1;
     }
 
-    // Smart folder filter
+    // Smart folder filter (with condition inheritance from ancestor chain)
     if let Some(ref smart_folder_id) = filter.smart_folder_id {
-        let sf = get_smart_folder_by_id(conn, smart_folder_id)?;
-        let sf_conditions: SmartFolderConditions = serde_json::from_str(&sf.conditions)?;
-        let mut sf_parts: Vec<String> = Vec::new();
-        for rule in &sf_conditions.rules {
-            match (rule.field.as_str(), rule.op.as_str()) {
-                ("tag", "contains") => {
-                    let val = format!("%{}%", rule.value.as_str().unwrap_or(""));
-                    sf_parts.push(format!(
-                        "EXISTS (SELECT 1 FROM archive_tags at2 JOIN tags t2 ON at2.tag_id = t2.id WHERE at2.archive_id = a.id AND t2.name LIKE ?{})",
-                        param_idx
-                    ));
-                    param_values.push(Box::new(val));
-                    param_idx += 1;
+        let all_sf_conditions = collect_smart_folder_conditions(conn, smart_folder_id)?;
+        let mut folder_level_parts: Vec<String> = Vec::new();
+        for sf_conditions in &all_sf_conditions {
+            let mut sf_parts: Vec<String> = Vec::new();
+            for rule in &sf_conditions.rules {
+                match (rule.field.as_str(), rule.op.as_str()) {
+                    ("tag", "contains") => {
+                        let val = format!("%{}%", rule.value.as_str().unwrap_or(""));
+                        sf_parts.push(format!(
+                            "EXISTS (SELECT 1 FROM archive_tags at2 JOIN tags t2 ON at2.tag_id = t2.id WHERE at2.archive_id = a.id AND t2.name LIKE ?{})",
+                            param_idx
+                        ));
+                        param_values.push(Box::new(val));
+                        param_idx += 1;
+                    }
+                    ("tag", "eq") => {
+                        let val = rule.value.as_str().unwrap_or("").to_string();
+                        sf_parts.push(format!(
+                            "EXISTS (SELECT 1 FROM archive_tags at2 JOIN tags t2 ON at2.tag_id = t2.id WHERE at2.archive_id = a.id AND t2.name = ?{})",
+                            param_idx
+                        ));
+                        param_values.push(Box::new(val));
+                        param_idx += 1;
+                    }
+                    ("rank", op) => {
+                        let sql_op = match op {
+                            "gte" => ">=",
+                            "lte" => "<=",
+                            "eq" => "=",
+                            _ => continue,
+                        };
+                        let val = rule.value.as_i64().unwrap_or(0) as i32;
+                        sf_parts.push(format!("a.rank {} ?{}", sql_op, param_idx));
+                        param_values.push(Box::new(val));
+                        param_idx += 1;
+                    }
+                    _ => {}
                 }
-                ("tag", "eq") => {
-                    let val = rule.value.as_str().unwrap_or("").to_string();
-                    sf_parts.push(format!(
-                        "EXISTS (SELECT 1 FROM archive_tags at2 JOIN tags t2 ON at2.tag_id = t2.id WHERE at2.archive_id = a.id AND t2.name = ?{})",
-                        param_idx
-                    ));
-                    param_values.push(Box::new(val));
-                    param_idx += 1;
-                }
-                ("rank", op) => {
-                    let sql_op = match op {
-                        "gte" => ">=",
-                        "lte" => "<=",
-                        "eq" => "=",
-                        _ => continue,
-                    };
-                    let val = rule.value.as_i64().unwrap_or(0) as i32;
-                    sf_parts.push(format!("a.rank {} ?{}", sql_op, param_idx));
-                    param_values.push(Box::new(val));
-                    param_idx += 1;
-                }
-                _ => {}
+            }
+            if !sf_parts.is_empty() {
+                let joiner = if sf_conditions.r#match == "any" { " OR " } else { " AND " };
+                folder_level_parts.push(format!("({})", sf_parts.join(joiner)));
             }
         }
-        if !sf_parts.is_empty() {
-            let joiner = if sf_conditions.r#match == "any" { " OR " } else { " AND " };
-            conditions.push(format!("({})", sf_parts.join(joiner)));
+        if !folder_level_parts.is_empty() {
+            // Each folder's conditions are AND-joined together (inheritance)
+            conditions.push(format!("({})", folder_level_parts.join(" AND ")));
         }
     }
 
@@ -1431,5 +1457,52 @@ mod tests {
         delete_smart_folder_recursive(&conn, &root.id).unwrap();
         let sfs = get_smart_folders(&conn).unwrap();
         assert!(sfs.is_empty());
+    }
+
+    #[test]
+    fn test_smart_folder_condition_inheritance() {
+        let conn = setup_db();
+
+        // a1: rank 4, tag "shounen" -> matches both parent and child conditions
+        let a1 = make_test_archive("a1", "Manga1");
+        insert_archive(&conn, &a1).unwrap();
+        update_archive(&conn, "a1", &ArchiveUpdate { title: None, rank: Some(4), memo: None, is_read: None }).unwrap();
+        let tag = create_tag(&conn, "shounen").unwrap();
+        set_archive_tags(&conn, "a1", &[tag.id.clone()]).unwrap();
+
+        // a2: rank 4, no tag -> matches child condition (rank>=3) but NOT parent condition (tag shounen)
+        let a2 = make_test_archive("a2", "Manga2");
+        insert_archive(&conn, &a2).unwrap();
+        update_archive(&conn, "a2", &ArchiveUpdate { title: None, rank: Some(4), memo: None, is_read: None }).unwrap();
+
+        // a3: rank 2, tag "shounen" -> matches parent condition but NOT child condition (rank>=3)
+        let a3 = make_test_archive("a3", "Manga3");
+        insert_archive(&conn, &a3).unwrap();
+        update_archive(&conn, "a3", &ArchiveUpdate { title: None, rank: Some(2), memo: None, is_read: None }).unwrap();
+        set_archive_tags(&conn, "a3", &[tag.id.clone()]).unwrap();
+
+        let parent = create_smart_folder_with_parent(
+            &conn, "Shounen", r#"{"match":"all","rules":[{"field":"tag","op":"contains","value":"shounen"}]}"#, None,
+        ).unwrap();
+
+        let child = create_smart_folder_with_parent(
+            &conn, "Shounen High Rank", r#"{"match":"all","rules":[{"field":"rank","op":"gte","value":3}]}"#, Some(&parent.id),
+        ).unwrap();
+
+        // Without inheritance, child would match a1 AND a2 (both rank>=3)
+        // With inheritance, child should only match a1 (rank>=3 AND tag shounen)
+        let filter = ArchiveFilter {
+            smart_folder_id: Some(child.id),
+            folder_id: None,
+            preset: None,
+            sort_by: None,
+            sort_order: None,
+            filter_tags: None,
+            filter_min_rank: None,
+            search_query: None,
+        };
+        let results = get_archive_summaries_filtered(&conn, &filter).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "a1");
     }
 }
