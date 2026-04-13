@@ -66,6 +66,8 @@ export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewP
             maxWidth: '100%',
             maxHeight: '100%',
             objectFit: 'contain',
+            imageRendering: 'smooth' as const,
+            filter: 'blur(0.3px)',
           }}
           draggable={false}
         />
@@ -103,6 +105,8 @@ export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewP
             maxWidth: '100%',
             maxHeight: '100%',
             objectFit: 'contain',
+            imageRendering: 'smooth' as const,
+            filter: 'blur(0.3px)',
           }}
           draggable={false}
         />
@@ -135,6 +139,8 @@ export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewP
           maxWidth: '50%',
           maxHeight: '100%',
           objectFit: 'contain',
+          imageRendering: 'smooth' as const,
+          filter: 'blur(0.3px)',
         }}
         draggable={false}
       />
@@ -146,6 +152,8 @@ export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewP
             maxWidth: '50%',
             maxHeight: '100%',
             objectFit: 'contain',
+            imageRendering: 'smooth' as const,
+            filter: 'blur(0.3px)',
           }}
           draggable={false}
         />
