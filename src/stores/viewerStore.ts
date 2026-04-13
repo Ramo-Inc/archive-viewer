@@ -104,8 +104,6 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   },
 
   closeArchive: () => {
-    // Cleanup temp pages when closing
-    tauriInvoke('cleanup_temp_pages').catch(() => {});
     set({ archive: null, currentPage: 0 });
   },
 
