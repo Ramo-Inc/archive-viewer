@@ -5,8 +5,45 @@ use crate::db::queries;
 use crate::db::DbState;
 use crate::error::AppError;
 use crate::imaging::thumbnail;
+use serde::{Deserialize, Serialize};
 use tauri::State;
-use uuid::Uuid;
+
+/// キャッシュ用メタデータ構造体
+#[derive(Serialize, Deserialize)]
+struct CachedPageMeta {
+    index: usize,
+    file_name: String,
+    width: u32,
+    height: u32,
+    is_spread: bool,
+}
+
+/// キャッシュからページ情報を読み込む
+/// meta.json が存在しパース可能なら Some(Vec<PageInfo>) を返す
+fn try_load_cache(pages_dir: &std::path::Path) -> Option<Vec<PageInfo>> {
+    let meta_path = pages_dir.join("meta.json");
+    let meta_json = std::fs::read_to_string(&meta_path).ok()?;
+    let cached: Vec<CachedPageMeta> = serde_json::from_str(&meta_json).ok()?;
+
+    let page_infos = cached
+        .into_iter()
+        .map(|m| {
+            let url = pages_dir
+                .join(&m.file_name)
+                .to_string_lossy()
+                .replace('\\', "/");
+            PageInfo {
+                index: m.index,
+                url,
+                width: m.width,
+                height: m.height,
+                is_spread: m.is_spread,
+            }
+        })
+        .collect();
+
+    Some(page_infos)
+}
 
 /// ページ準備: アーカイブ内の全ページを一時ディレクトリに展開
 /// CR-1: Zip Slip対策付き (パストラバーサル防止)
@@ -31,7 +68,7 @@ pub fn prepare_pages(
     let pages = reader.list_pages()?;
 
     // セッション固有の一時ディレクトリを作成
-    let session_id = Uuid::new_v4().to_string();
+    let session_id = uuid::Uuid::new_v4().to_string();
     let temp_dir = library_path.join("temp").join(&session_id);
     std::fs::create_dir_all(&temp_dir)?;
 
@@ -129,4 +166,105 @@ pub fn cleanup_temp_pages() -> Result<(), AppError> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_cached_page_meta_roundtrip() {
+        let meta = CachedPageMeta {
+            index: 0,
+            file_name: "000_page001.png".to_string(),
+            width: 1200,
+            height: 1800,
+            is_spread: false,
+        };
+        let json = serde_json::to_string(&meta).unwrap();
+        let deserialized: CachedPageMeta = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.index, 0);
+        assert_eq!(deserialized.file_name, "000_page001.png");
+        assert_eq!(deserialized.width, 1200);
+        assert_eq!(deserialized.height, 1800);
+        assert!(!deserialized.is_spread);
+    }
+
+    #[test]
+    fn test_cached_page_meta_spread() {
+        let meta = CachedPageMeta {
+            index: 5,
+            file_name: "005_spread.jpg".to_string(),
+            width: 2400,
+            height: 1800,
+            is_spread: true,
+        };
+        let json = serde_json::to_string(&meta).unwrap();
+        let deserialized: CachedPageMeta = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.is_spread);
+        assert_eq!(deserialized.width, 2400);
+    }
+
+    #[test]
+    fn test_try_load_cache_valid_meta() {
+        let tmp = TempDir::new().unwrap();
+        let pages_dir = tmp.path().join("pages");
+        std::fs::create_dir_all(&pages_dir).unwrap();
+
+        let metas = vec![
+            CachedPageMeta {
+                index: 0,
+                file_name: "000_page001.png".to_string(),
+                width: 1200,
+                height: 1800,
+                is_spread: false,
+            },
+            CachedPageMeta {
+                index: 1,
+                file_name: "001_page002.png".to_string(),
+                width: 2400,
+                height: 1800,
+                is_spread: true,
+            },
+        ];
+        let json = serde_json::to_string(&metas).unwrap();
+        std::fs::write(pages_dir.join("meta.json"), &json).unwrap();
+
+        let result = try_load_cache(&pages_dir);
+        assert!(result.is_some());
+        let infos = result.unwrap();
+        assert_eq!(infos.len(), 2);
+        assert_eq!(infos[0].index, 0);
+        assert_eq!(infos[0].width, 1200);
+        assert!(!infos[0].is_spread);
+        assert!(infos[0].url.contains("000_page001.png"));
+        assert_eq!(infos[1].index, 1);
+        assert!(infos[1].is_spread);
+        assert!(infos[1].url.contains("001_page002.png"));
+    }
+
+    #[test]
+    fn test_try_load_cache_missing_meta() {
+        let tmp = TempDir::new().unwrap();
+        let result = try_load_cache(tmp.path());
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_try_load_cache_corrupted_meta() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("meta.json"), "not valid json!!!").unwrap();
+        let result = try_load_cache(tmp.path());
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_try_load_cache_empty_array() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("meta.json"), "[]").unwrap();
+        let result = try_load_cache(tmp.path());
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().len(), 0);
+    }
 }
