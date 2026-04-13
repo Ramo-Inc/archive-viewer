@@ -4,6 +4,8 @@ use chrono::Utc;
 use rusqlite::{params, Connection};
 use uuid::Uuid;
 
+const MAX_DEPTH_GUARD: i32 = 10;
+
 // === Archives ===
 
 pub fn insert_archive(conn: &Connection, archive: &Archive) -> Result<(), AppError> {
@@ -168,7 +170,7 @@ pub fn set_archive_missing(conn: &Connection, id: &str, missing: bool) -> Result
 
 pub fn get_folders(conn: &Connection) -> Result<Vec<Folder>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, parent_id, sort_order, created_at FROM folders ORDER BY sort_order",
+        "SELECT id, name, parent_id, sort_order, created_at FROM folders ORDER BY sort_order, name",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(Folder {
@@ -216,6 +218,55 @@ pub fn rename_folder(conn: &Connection, id: &str, name: &str) -> Result<(), AppE
 }
 
 pub fn delete_folder(conn: &Connection, id: &str) -> Result<(), AppError> {
+    conn.execute("DELETE FROM folders WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
+pub fn get_folder_depth(conn: &Connection, folder_id: &str) -> Result<i32, AppError> {
+    let mut depth = 0;
+    let mut current_id = folder_id.to_string();
+    loop {
+        let parent_id: Option<String> = conn.query_row(
+            "SELECT parent_id FROM folders WHERE id = ?1",
+            params![current_id],
+            |row| row.get(0),
+        ).map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                AppError::Validation(format!("フォルダが見つかりません: {}", current_id))
+            }
+            other => AppError::Database(other.to_string()),
+        })?;
+        match parent_id {
+            Some(pid) => {
+                depth += 1;
+                if depth > MAX_DEPTH_GUARD {
+                    return Err(AppError::Validation("フォルダ階層が深すぎます（循環参照の可能性）".to_string()));
+                }
+                current_id = pid;
+            }
+            None => break,
+        }
+    }
+    Ok(depth)
+}
+
+pub fn delete_folder_recursive(conn: &Connection, id: &str) -> Result<(), AppError> {
+    conn.execute_batch("BEGIN;")?;
+    match delete_folder_recursive_inner(conn, id) {
+        Ok(()) => { conn.execute_batch("COMMIT;")?; Ok(()) }
+        Err(e) => { let _ = conn.execute_batch("ROLLBACK;"); Err(e) }
+    }
+}
+
+fn delete_folder_recursive_inner(conn: &Connection, id: &str) -> Result<(), AppError> {
+    let mut stmt = conn.prepare("SELECT id FROM folders WHERE parent_id = ?1")?;
+    let child_ids: Vec<String> = stmt
+        .query_map(params![id], |row| row.get(0))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::Database(e.to_string()))?;
+    for child_id in &child_ids {
+        delete_folder_recursive_inner(conn, child_id)?;
+    }
     conn.execute("DELETE FROM folders WHERE id = ?1", params![id])?;
     Ok(())
 }
@@ -342,7 +393,7 @@ pub fn get_folders_for_archive(
 
 pub fn get_smart_folders(conn: &Connection) -> Result<Vec<SmartFolder>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, conditions, sort_order, parent_id, created_at FROM smart_folders ORDER BY sort_order",
+        "SELECT id, name, conditions, sort_order, parent_id, created_at FROM smart_folders ORDER BY sort_order, name",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(SmartFolder {
@@ -389,18 +440,27 @@ pub fn create_smart_folder(
     name: &str,
     conditions: &str,
 ) -> Result<SmartFolder, AppError> {
+    create_smart_folder_with_parent(conn, name, conditions, None)
+}
+
+pub fn create_smart_folder_with_parent(
+    conn: &Connection,
+    name: &str,
+    conditions: &str,
+    parent_id: Option<&str>,
+) -> Result<SmartFolder, AppError> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
     conn.execute(
-        "INSERT INTO smart_folders (id, name, conditions, sort_order, created_at) VALUES (?1, ?2, ?3, 0, ?4)",
-        params![id, name, conditions, now],
+        "INSERT INTO smart_folders (id, name, conditions, sort_order, parent_id, created_at) VALUES (?1, ?2, ?3, 0, ?4, ?5)",
+        params![id, name, conditions, parent_id, now],
     )?;
     Ok(SmartFolder {
         id,
         name: name.to_string(),
         conditions: conditions.to_string(),
         sort_order: 0,
-        parent_id: None,
+        parent_id: parent_id.map(|s| s.to_string()),
         created_at: now,
     })
 }
@@ -420,6 +480,55 @@ pub fn update_smart_folder(
 }
 
 pub fn delete_smart_folder(conn: &Connection, id: &str) -> Result<(), AppError> {
+    conn.execute("DELETE FROM smart_folders WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
+pub fn get_smart_folder_depth(conn: &Connection, sf_id: &str) -> Result<i32, AppError> {
+    let mut depth = 0;
+    let mut current_id = sf_id.to_string();
+    loop {
+        let parent_id: Option<String> = conn.query_row(
+            "SELECT parent_id FROM smart_folders WHERE id = ?1",
+            params![current_id],
+            |row| row.get(0),
+        ).map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                AppError::Validation(format!("スマートフォルダが見つかりません: {}", current_id))
+            }
+            other => AppError::Database(other.to_string()),
+        })?;
+        match parent_id {
+            Some(pid) => {
+                depth += 1;
+                if depth > MAX_DEPTH_GUARD {
+                    return Err(AppError::Validation("スマートフォルダ階層が深すぎます（循環参照の可能性）".to_string()));
+                }
+                current_id = pid;
+            }
+            None => break,
+        }
+    }
+    Ok(depth)
+}
+
+pub fn delete_smart_folder_recursive(conn: &Connection, id: &str) -> Result<(), AppError> {
+    conn.execute_batch("BEGIN;")?;
+    match delete_smart_folder_recursive_inner(conn, id) {
+        Ok(()) => { conn.execute_batch("COMMIT;")?; Ok(()) }
+        Err(e) => { let _ = conn.execute_batch("ROLLBACK;"); Err(e) }
+    }
+}
+
+fn delete_smart_folder_recursive_inner(conn: &Connection, id: &str) -> Result<(), AppError> {
+    let mut stmt = conn.prepare("SELECT id FROM smart_folders WHERE parent_id = ?1")?;
+    let child_ids: Vec<String> = stmt
+        .query_map(params![id], |row| row.get(0))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::Database(e.to_string()))?;
+    for child_id in &child_ids {
+        delete_smart_folder_recursive_inner(conn, child_id)?;
+    }
     conn.execute("DELETE FROM smart_folders WHERE id = ?1", params![id])?;
     Ok(())
 }
@@ -1262,5 +1371,65 @@ mod tests {
         };
         let results = get_archive_summaries_filtered(&conn, &filter).unwrap();
         assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_get_folder_depth_root() {
+        let conn = setup_db();
+        let root = create_folder(&conn, "Root", None).unwrap();
+        assert_eq!(get_folder_depth(&conn, &root.id).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_get_folder_depth_nested() {
+        let conn = setup_db();
+        let root = create_folder(&conn, "Root", None).unwrap();
+        let child = create_folder(&conn, "Child", Some(&root.id)).unwrap();
+        let grandchild = create_folder(&conn, "Grandchild", Some(&child.id)).unwrap();
+        assert_eq!(get_folder_depth(&conn, &root.id).unwrap(), 0);
+        assert_eq!(get_folder_depth(&conn, &child.id).unwrap(), 1);
+        assert_eq!(get_folder_depth(&conn, &grandchild.id).unwrap(), 2);
+    }
+
+    #[test]
+    fn test_delete_folder_recursive() {
+        let conn = setup_db();
+        let root = create_folder(&conn, "Root", None).unwrap();
+        let child = create_folder(&conn, "Child", Some(&root.id)).unwrap();
+        let _grandchild = create_folder(&conn, "Grandchild", Some(&child.id)).unwrap();
+        delete_folder_recursive(&conn, &root.id).unwrap();
+        let folders = get_folders(&conn).unwrap();
+        assert!(folders.is_empty());
+    }
+
+    #[test]
+    fn test_delete_folder_recursive_preserves_siblings() {
+        let conn = setup_db();
+        let parent = create_folder(&conn, "Parent", None).unwrap();
+        let _child1 = create_folder(&conn, "Child1", Some(&parent.id)).unwrap();
+        let sibling = create_folder(&conn, "Sibling", None).unwrap();
+        delete_folder_recursive(&conn, &parent.id).unwrap();
+        let folders = get_folders(&conn).unwrap();
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders[0].id, sibling.id);
+    }
+
+    #[test]
+    fn test_get_smart_folder_depth() {
+        let conn = setup_db();
+        let root = create_smart_folder_with_parent(&conn, "Root", r#"{"match":"all","rules":[]}"#, None).unwrap();
+        let child = create_smart_folder_with_parent(&conn, "Child", r#"{"match":"all","rules":[]}"#, Some(&root.id)).unwrap();
+        assert_eq!(get_smart_folder_depth(&conn, &root.id).unwrap(), 0);
+        assert_eq!(get_smart_folder_depth(&conn, &child.id).unwrap(), 1);
+    }
+
+    #[test]
+    fn test_delete_smart_folder_recursive() {
+        let conn = setup_db();
+        let root = create_smart_folder_with_parent(&conn, "Root", r#"{"match":"all","rules":[]}"#, None).unwrap();
+        let _child = create_smart_folder_with_parent(&conn, "Child", r#"{"match":"all","rules":[]}"#, Some(&root.id)).unwrap();
+        delete_smart_folder_recursive(&conn, &root.id).unwrap();
+        let sfs = get_smart_folders(&conn).unwrap();
+        assert!(sfs.is_empty());
     }
 }
