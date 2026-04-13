@@ -51,6 +51,13 @@ function buildFolderTree(folders: Folder[]): FolderNode[] {
   }
   setDepths(roots, 0);
 
+  // Explicit sort: sort_order then name (don't rely on backend order)
+  function sortChildren(nodes: FolderNode[]) {
+    nodes.sort((a, b) => a.folder.sort_order - b.folder.sort_order || a.folder.name.localeCompare(b.folder.name));
+    for (const n of nodes) sortChildren(n.children);
+  }
+  sortChildren(roots);
+
   return roots;
 }
 
@@ -79,6 +86,12 @@ function buildSmartFolderTree(smartFolders: SmartFolder[]): SmartFolderNode[] {
     }
   }
   setDepths(roots, 0);
+
+  function sortChildren(nodes: SmartFolderNode[]) {
+    nodes.sort((a, b) => a.smartFolder.sort_order - b.smartFolder.sort_order || a.smartFolder.name.localeCompare(b.smartFolder.name));
+    for (const n of nodes) sortChildren(n.children);
+  }
+  sortChildren(roots);
 
   return roots;
 }
