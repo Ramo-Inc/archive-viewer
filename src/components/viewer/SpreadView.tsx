@@ -1,11 +1,12 @@
 import { convertFileSrc } from '@tauri-apps/api/core';
 import type { PageInfo } from '../../types';
-import { useViewerStore } from '../../stores/viewerStore';
+import CanvasPage from './CanvasPage';
 
 // ============================================================
 // SpreadView — displays one or two pages depending on viewMode
 // Handles: cover page solo, is_spread solo, RTL ordering,
 // and single-page mode (Errata HI-8, M-10).
+// Uses CanvasPage for moire-free rendering via canvas drawImage.
 // ============================================================
 
 interface SpreadViewProps {
@@ -16,9 +17,6 @@ interface SpreadViewProps {
 
 /**
  * Build the page image URL from a PageInfo.
- * The Rust backend sends a file path — we use convertFileSrc
- * to create the platform-correct asset URL.
- * (Windows: http://asset.localhost/..., macOS/Linux: asset://localhost/...)
  */
 function pageUrl(page: PageInfo): string {
   const raw = page.url || '';
@@ -28,20 +26,7 @@ function pageUrl(page: PageInfo): string {
   return convertFileSrc(raw);
 }
 
-/** Build shared img style with conditional moire reduction blur. */
-function pageStyle(moireReduction: number, maxWidth: string): React.CSSProperties {
-  return {
-    maxWidth,
-    maxHeight: '100%',
-    objectFit: 'contain',
-    imageRendering: 'smooth' as const,
-    ...(moireReduction > 0 ? { filter: `blur(${moireReduction}px)` } : {}),
-  };
-}
-
 export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewProps) {
-  const moireReduction = useViewerStore((s) => s.moireReduction);
-
   if (pages.length === 0) {
     return (
       <div
@@ -73,22 +58,20 @@ export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewP
           overflow: 'hidden',
         }}
       >
-        <img
+        <CanvasPage
           src={pageUrl(currentPageInfo)}
           alt={`Page ${currentPage + 1}`}
-          style={pageStyle(moireReduction, '100%')}
-          draggable={false}
+          naturalWidth={currentPageInfo.width}
+          naturalHeight={currentPageInfo.height}
+          maxWidthRatio={1.0}
         />
       </div>
     );
   }
 
   // --- Spread (two-page) mode ---
-  // Cover page (index 0) is always shown solo
   const isCover = currentPage === 0;
-  // A spread page (double-width) is shown solo
   const isSpread = currentPageInfo.is_spread;
-  // Last page alone if odd
   const isLastAlone =
     currentPage === pages.length - 1 ||
     (currentPage + 1 < pages.length && pages[currentPage + 1].is_spread);
@@ -106,20 +89,20 @@ export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewP
           overflow: 'hidden',
         }}
       >
-        <img
+        <CanvasPage
           src={pageUrl(currentPageInfo)}
           alt={`Page ${currentPage + 1}`}
-          style={pageStyle(moireReduction, '100%')}
-          draggable={false}
+          naturalWidth={currentPageInfo.width}
+          naturalHeight={currentPageInfo.height}
+          maxWidthRatio={1.0}
         />
       </div>
     );
   }
 
   // Two-page spread — RTL ordering (Errata M-10)
-  // direction: rtl makes the first child appear on the right side
-  const leftPage = pages[currentPage + 1]; // left side = second page (in RTL, visually left)
-  const rightPage = currentPageInfo; // right side = current page
+  const leftPage = pages[currentPage + 1];
+  const rightPage = currentPageInfo;
 
   return (
     <div
@@ -133,19 +116,20 @@ export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewP
         gap: 0,
       }}
     >
-      {/* In RTL flow, first child renders on the right */}
-      <img
+      <CanvasPage
         src={pageUrl(rightPage)}
         alt={`Page ${currentPage + 1}`}
-        style={pageStyle(moireReduction, '50%')}
-        draggable={false}
+        naturalWidth={rightPage.width}
+        naturalHeight={rightPage.height}
+        maxWidthRatio={0.5}
       />
       {leftPage && (
-        <img
+        <CanvasPage
           src={pageUrl(leftPage)}
           alt={`Page ${currentPage + 2}`}
-          style={pageStyle(moireReduction, '50%')}
-          draggable={false}
+          naturalWidth={leftPage.width}
+          naturalHeight={leftPage.height}
+          maxWidthRatio={0.5}
         />
       )}
     </div>
