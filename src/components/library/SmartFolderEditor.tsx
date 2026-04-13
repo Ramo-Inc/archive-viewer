@@ -25,6 +25,7 @@ interface Rule {
 interface SmartFolderEditorProps {
   /** Pass an existing smart folder to edit, or omit to create new. */
   existing?: SmartFolder;
+  parentId?: string | null;
   onClose: () => void;
   onSaved?: () => void;
 }
@@ -87,6 +88,7 @@ function parseExistingRules(existing?: SmartFolder): {
 
 export default function SmartFolderEditor({
   existing,
+  parentId,
   onClose,
   onSaved,
 }: SmartFolderEditorProps) {
@@ -160,6 +162,7 @@ export default function SmartFolderEditor({
         await tauriInvoke('create_smart_folder', {
           name: name.trim(),
           conditions,
+          parentId: parentId ?? null,
         });
         addToast('スマートフォルダを作成しました', 'success');
       }
@@ -171,7 +174,7 @@ export default function SmartFolderEditor({
     } finally {
       setSaving(false);
     }
-  }, [name, match, rules, existing, fetchSmartFolders, addToast, onSaved, onClose]);
+  }, [name, match, rules, existing, parentId, fetchSmartFolders, addToast, onSaved, onClose]);
 
   return (
     <div
