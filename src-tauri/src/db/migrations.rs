@@ -1,13 +1,16 @@
 use crate::error::AppError;
 use rusqlite::Connection;
 
-const CURRENT_VERSION: i32 = 1;
+const CURRENT_VERSION: i32 = 2;
 
 pub fn run(conn: &Connection) -> Result<(), AppError> {
     let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
 
     if version < 1 {
         migrate_v1(conn)?;
+    }
+    if version < 2 {
+        migrate_v2(conn)?;
     }
 
     Ok(())
@@ -87,6 +90,19 @@ fn migrate_v1(conn: &Connection) -> Result<(), AppError> {
     )?;
     conn.execute_batch("PRAGMA user_version = 1; COMMIT;")?;
 
+    Ok(())
+}
+
+fn migrate_v2(conn: &Connection) -> Result<(), AppError> {
+    let has_column = conn
+        .prepare("SELECT parent_id FROM smart_folders LIMIT 0")
+        .is_ok();
+    if !has_column {
+        conn.execute_batch(
+            "ALTER TABLE smart_folders ADD COLUMN parent_id TEXT REFERENCES smart_folders(id) ON DELETE SET NULL;",
+        )?;
+    }
+    conn.execute_batch("PRAGMA user_version = 2;")?;
     Ok(())
 }
 
@@ -245,7 +261,7 @@ mod tests {
         let version: i32 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
     }
 
     #[test]
@@ -296,6 +312,41 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_smart_folders_has_parent_id_column() {
+        let conn = setup_db();
+        run(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO smart_folders (id, name, conditions, sort_order, parent_id, created_at)
+             VALUES ('sf1', 'Test', '{\"match\":\"all\",\"rules\":[]}', 0, NULL, '2026-01-01')",
+            [],
+        ).unwrap();
+        let parent_id: Option<String> = conn
+            .query_row("SELECT parent_id FROM smart_folders WHERE id='sf1'", [], |row| row.get(0))
+            .unwrap();
+        assert!(parent_id.is_none());
+    }
+
+    #[test]
+    fn test_smart_folder_parent_id_foreign_key() {
+        let conn = setup_db();
+        run(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO smart_folders (id, name, conditions, sort_order, created_at)
+             VALUES ('sf-parent', 'Parent', '{\"match\":\"all\",\"rules\":[]}', 0, '2026-01-01')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO smart_folders (id, name, conditions, sort_order, parent_id, created_at)
+             VALUES ('sf-child', 'Child', '{\"match\":\"all\",\"rules\":[]}', 0, 'sf-parent', '2026-01-01')",
+            [],
+        ).unwrap();
+        let parent_id: Option<String> = conn
+            .query_row("SELECT parent_id FROM smart_folders WHERE id='sf-child'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(parent_id, Some("sf-parent".to_string()));
     }
 
     #[test]
