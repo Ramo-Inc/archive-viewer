@@ -421,29 +421,6 @@ pub fn delete_smart_folder(conn: &Connection, id: &str) -> Result<(), AppError> 
     Ok(())
 }
 
-// === Settings ===
-
-pub fn get_setting(conn: &Connection, key: &str) -> Result<Option<String>, AppError> {
-    let result = conn.query_row(
-        "SELECT value FROM settings WHERE key = ?1",
-        params![key],
-        |row| row.get(0),
-    );
-    match result {
-        Ok(value) => Ok(Some(value)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(AppError::Database(e.to_string())),
-    }
-}
-
-pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), AppError> {
-    conn.execute(
-        "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2",
-        params![key, value],
-    )?;
-    Ok(())
-}
-
 // === Filtered Queries (E2-9) ===
 
 pub fn get_archive_summaries_filtered(
@@ -986,32 +963,6 @@ mod tests {
     }
 
     // === Settings Tests ===
-
-    #[test]
-    fn test_set_and_get_setting() {
-        let conn = setup_db();
-        set_setting(&conn, "grid_size", "200").unwrap();
-
-        let value = get_setting(&conn, "grid_size").unwrap();
-        assert_eq!(value, Some("200".to_string()));
-    }
-
-    #[test]
-    fn test_get_nonexistent_setting() {
-        let conn = setup_db();
-        let value = get_setting(&conn, "nonexistent").unwrap();
-        assert_eq!(value, None);
-    }
-
-    #[test]
-    fn test_set_setting_upsert() {
-        let conn = setup_db();
-        set_setting(&conn, "grid_size", "200").unwrap();
-        set_setting(&conn, "grid_size", "300").unwrap();
-
-        let value = get_setting(&conn, "grid_size").unwrap();
-        assert_eq!(value, Some("300".to_string()));
-    }
 
     // === Filtered Query Tests ===
 

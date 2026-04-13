@@ -186,8 +186,7 @@ export default function ViewerPage() {
   }
 
   // --- Main viewer ---
-  const effectiveViewMode: 'spread' | 'single' =
-    viewMode === 'webtoon' ? 'single' : viewMode;
+  const effectiveViewMode = viewMode;
 
   return (
     <div

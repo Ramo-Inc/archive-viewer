@@ -8,7 +8,7 @@ import { tauriInvoke } from '../hooks/useTauriCommand';
 // the current spread (two-page) display mode.
 // ============================================================
 
-export type ViewMode = 'single' | 'spread' | 'webtoon';
+export type ViewMode = 'single' | 'spread';
 export type PageOrder = 'rtl' | 'ltr';
 
 interface ViewerState {

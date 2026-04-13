@@ -21,25 +21,10 @@ impl Default for WindowState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ViewerSettings {
-    pub moire_reduction: f32,
-}
-
-impl Default for ViewerSettings {
-    fn default() -> Self {
-        Self {
-            moire_reduction: 0.5,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub library_path: Option<String>,
     #[serde(default)]
     pub window_state: WindowState,
-    #[serde(default)]
-    pub viewer_settings: ViewerSettings,
 }
 
 impl Default for AppConfig {
@@ -47,7 +32,6 @@ impl Default for AppConfig {
         Self {
             library_path: None,
             window_state: WindowState::default(),
-            viewer_settings: ViewerSettings::default(),
         }
     }
 }
@@ -134,7 +118,6 @@ mod tests {
                 height: 1080,
                 maximized: true,
             },
-            viewer_settings: ViewerSettings::default(),
         };
 
         save_config_to(&config, &config_file).unwrap();
@@ -160,7 +143,6 @@ mod tests {
         let config = AppConfig {
             library_path: Some("C:/Comics".to_string()),
             window_state: WindowState::default(),
-            viewer_settings: ViewerSettings::default(),
         };
 
         let json = serde_json::to_string(&config).unwrap();
@@ -188,30 +170,4 @@ mod tests {
         assert!(config_file.exists());
     }
 
-    #[test]
-    fn test_viewer_settings_default() {
-        let settings = ViewerSettings::default();
-        assert_eq!(settings.moire_reduction, 0.5);
-    }
-
-    #[test]
-    fn test_config_missing_viewer_settings_uses_default() {
-        let json = r#"{"library_path": "D:/Manga"}"#;
-        let config: AppConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(config.viewer_settings.moire_reduction, 0.5);
-    }
-
-    #[test]
-    fn test_viewer_settings_roundtrip() {
-        let tmp = TempDir::new().unwrap();
-        let config_file = tmp.path().join("config.json");
-        let config = AppConfig {
-            library_path: Some("D:/Manga".to_string()),
-            window_state: WindowState::default(),
-            viewer_settings: ViewerSettings { moire_reduction: 1.2 },
-        };
-        save_config_to(&config, &config_file).unwrap();
-        let loaded = load_config_from(&config_file).unwrap();
-        assert!((loaded.viewer_settings.moire_reduction - 1.2).abs() < f32::EPSILON);
-    }
 }

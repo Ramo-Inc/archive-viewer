@@ -39,14 +39,6 @@ export interface ViewerArchive extends ArchiveDetail {
   pages: PageInfo[];
 }
 
-/** Payload for updating archive metadata. */
-export interface ArchiveUpdate {
-  title?: string;
-  rank?: number;
-  memo?: string;
-  is_read?: boolean;
-}
-
 /** Filter / sort criteria sent to the backend. */
 export interface ArchiveFilter {
   folder_id?: string | null;
@@ -93,7 +85,3 @@ export interface PageInfo {
   is_spread: boolean;
 }
 
-/** Viewer display settings (persisted to config.json). */
-export interface ViewerSettings {
-  moire_reduction: number;
-}

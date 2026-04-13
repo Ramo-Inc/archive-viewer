@@ -220,53 +220,6 @@ pub fn save_read_position(
     queries::save_read_position(conn, &archive_id, page)
 }
 
-/// 一時ページファイルのクリーンアップ
-#[tauri::command]
-pub fn cleanup_temp_pages() -> Result<(), AppError> {
-    let library_path = config::get_library_root()?;
-    let temp_dir = library_path.join("temp");
-
-    if temp_dir.exists() {
-        // tempディレクトリ配下を全て削除
-        if let Ok(entries) = std::fs::read_dir(&temp_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    let _ = std::fs::remove_dir_all(&path);
-                } else {
-                    let _ = std::fs::remove_file(&path);
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// ビューア設定を取得
-#[tauri::command]
-pub fn get_viewer_settings() -> Result<config::ViewerSettings, AppError> {
-    let cfg = config::load_config()?;
-    Ok(cfg.viewer_settings)
-}
-
-/// ビューア設定を保存（内部実装: テスト用にパス指定可能）
-fn save_viewer_settings_impl(
-    settings: &config::ViewerSettings,
-    config_path: &std::path::Path,
-) -> Result<(), AppError> {
-    let mut cfg = config::load_config_from(config_path)?;
-    cfg.viewer_settings.moire_reduction = settings.moire_reduction.clamp(0.0, 2.0);
-    config::save_config_to(&cfg, config_path)
-}
-
-/// ビューア設定を保存
-#[tauri::command]
-pub fn save_viewer_settings(settings: config::ViewerSettings) -> Result<(), AppError> {
-    let config_path = config::config_path()?;
-    save_viewer_settings_impl(&settings, &config_path)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -496,45 +449,4 @@ mod tests {
         assert_eq!(entries.len(), 2);
     }
 
-    #[test]
-    fn test_save_and_load_viewer_settings() {
-        let tmp = TempDir::new().unwrap();
-        let config_file = tmp.path().join("config.json");
-        let initial = config::AppConfig::default();
-        config::save_config_to(&initial, &config_file).unwrap();
-
-        let settings = config::ViewerSettings { moire_reduction: 1.5 };
-        save_viewer_settings_impl(&settings, &config_file).unwrap();
-
-        let loaded = config::load_config_from(&config_file).unwrap();
-        assert!((loaded.viewer_settings.moire_reduction - 1.5).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_save_viewer_settings_clamps_high() {
-        let tmp = TempDir::new().unwrap();
-        let config_file = tmp.path().join("config.json");
-        let initial = config::AppConfig::default();
-        config::save_config_to(&initial, &config_file).unwrap();
-
-        let settings = config::ViewerSettings { moire_reduction: 5.0 };
-        save_viewer_settings_impl(&settings, &config_file).unwrap();
-
-        let loaded = config::load_config_from(&config_file).unwrap();
-        assert!((loaded.viewer_settings.moire_reduction - 2.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_save_viewer_settings_clamps_negative() {
-        let tmp = TempDir::new().unwrap();
-        let config_file = tmp.path().join("config.json");
-        let initial = config::AppConfig::default();
-        config::save_config_to(&initial, &config_file).unwrap();
-
-        let settings = config::ViewerSettings { moire_reduction: -1.0 };
-        save_viewer_settings_impl(&settings, &config_file).unwrap();
-
-        let loaded = config::load_config_from(&config_file).unwrap();
-        assert!((loaded.viewer_settings.moire_reduction - 0.0).abs() < f32::EPSILON);
-    }
 }
