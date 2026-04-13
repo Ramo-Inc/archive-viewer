@@ -1,12 +1,12 @@
 import { convertFileSrc } from '@tauri-apps/api/core';
 import type { PageInfo } from '../../types';
-import CanvasPage from './CanvasPage';
 
 // ============================================================
 // SpreadView — displays one or two pages depending on viewMode
 // Handles: cover page solo, is_spread solo, RTL ordering,
-// and single-page mode (Errata HI-8, M-10).
-// Uses CanvasPage for moire-free rendering via canvas drawImage.
+// and single-page mode.
+// Images are pre-resized by Rust Lanczos3 to display resolution,
+// so <img> renders at near-1:1 with no moiré.
 // ============================================================
 
 interface SpreadViewProps {
@@ -15,9 +15,6 @@ interface SpreadViewProps {
   viewMode: 'spread' | 'single';
 }
 
-/**
- * Build the page image URL from a PageInfo.
- */
 function pageUrl(page: PageInfo): string {
   const raw = page.url || '';
   if (raw.startsWith('http://') || raw.startsWith('https://')) {
@@ -25,6 +22,20 @@ function pageUrl(page: PageInfo): string {
   }
   return convertFileSrc(raw);
 }
+
+const soloImgStyle: React.CSSProperties = {
+  maxWidth: '100%',
+  maxHeight: '100%',
+  objectFit: 'contain',
+  display: 'block',
+};
+
+const spreadImgStyle: React.CSSProperties = {
+  maxWidth: '50%',
+  maxHeight: '100%',
+  objectFit: 'contain',
+  display: 'block',
+};
 
 export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewProps) {
   if (pages.length === 0) {
@@ -46,7 +57,7 @@ export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewP
   const currentPageInfo = pages[currentPage];
   if (!currentPageInfo) return null;
 
-  // --- Single page mode (Errata HI-8) ---
+  // --- Single page mode ---
   if (viewMode === 'single') {
     return (
       <div
@@ -58,12 +69,11 @@ export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewP
           overflow: 'hidden',
         }}
       >
-        <CanvasPage
+        <img
           src={pageUrl(currentPageInfo)}
           alt={`Page ${currentPage + 1}`}
-          naturalWidth={currentPageInfo.width}
-          naturalHeight={currentPageInfo.height}
-          maxWidthRatio={1.0}
+          draggable={false}
+          style={soloImgStyle}
         />
       </div>
     );
@@ -89,18 +99,17 @@ export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewP
           overflow: 'hidden',
         }}
       >
-        <CanvasPage
+        <img
           src={pageUrl(currentPageInfo)}
           alt={`Page ${currentPage + 1}`}
-          naturalWidth={currentPageInfo.width}
-          naturalHeight={currentPageInfo.height}
-          maxWidthRatio={1.0}
+          draggable={false}
+          style={soloImgStyle}
         />
       </div>
     );
   }
 
-  // Two-page spread — RTL ordering (Errata M-10)
+  // Two-page spread — RTL ordering for manga
   const leftPage = pages[currentPage + 1];
   const rightPage = currentPageInfo;
 
@@ -113,23 +122,20 @@ export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewP
         justifyContent: 'center',
         direction: 'rtl',
         overflow: 'hidden',
-        gap: 0,
       }}
     >
-      <CanvasPage
+      <img
         src={pageUrl(rightPage)}
         alt={`Page ${currentPage + 1}`}
-        naturalWidth={rightPage.width}
-        naturalHeight={rightPage.height}
-        maxWidthRatio={0.5}
+        draggable={false}
+        style={spreadImgStyle}
       />
       {leftPage && (
-        <CanvasPage
+        <img
           src={pageUrl(leftPage)}
           alt={`Page ${currentPage + 2}`}
-          naturalWidth={leftPage.width}
-          naturalHeight={leftPage.height}
-          maxWidthRatio={0.5}
+          draggable={false}
+          style={spreadImgStyle}
         />
       )}
     </div>

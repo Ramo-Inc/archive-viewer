@@ -9,17 +9,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run dev        # Vite dev server at http://localhost:5173
 npm run build      # tsc type check + Vite production build
 npm run lint       # ESLint static analysis
+npx tsc --noEmit   # TypeScript type check only (no emit)
 
 # Desktop app (Tauri)
 npx tauri dev      # Full desktop app with hot reload
 npx tauri build    # Production desktop build
 
-# Rust backend only
-cd src-tauri && cargo check   # Type check Rust code
-cd src-tauri && cargo build   # Build Rust backend
+# Rust backend
+cd src-tauri && cargo check          # Fast type check
+cd src-tauri && cargo build          # Build backend
+cd src-tauri && cargo test           # Run all Rust unit tests
+cd src-tauri && cargo test -- --nocapture  # Tests with stdout
 ```
-
-There is no test suite yet.
 
 ## Architecture
 
@@ -46,11 +47,11 @@ There is no test suite yet.
 
 ### Backend (`src-tauri/src/`)
 
-**Commands** (`commands/`): ~25 Tauri commands registered in `lib.rs`:
+**Commands** (`commands/`): ~28 Tauri commands registered in `lib.rs`:
 - `library.rs` — folder/tag/smart-folder CRUD, `init_library`, `get_library_path`
-- `archive.rs` — `get_archives(filter)`, update/delete, `import_files`
-- `viewer.rs` — `prepare_pages` (extracts to temp dir, returns asset URLs), `save_read_position`
-- `drag_drop.rs` — `import_dropped_files`
+- `archive.rs` — `get_archives(filter)`, `get_archive_detail`, `update_archive`, `delete_archives`, `search_archives`, `import_archives`
+- `viewer.rs` — `prepare_pages` (extracts to temp dir, returns asset URLs), `save_read_position`, `cleanup_temp_pages`, `get_viewer_settings`, `save_viewer_settings`
+- `drag_drop.rs` — `import_dropped_files` (external OS file drops), `handle_internal_drag` (archive-to-folder moves)
 
 **Database** (`db/`): SQLite via `rusqlite` with WAL mode and foreign keys. Schema in `migrations.rs`. State managed as `Mutex<Option<Connection>>` in `DbState`. Tables: `archives`, `folders`, `tags`, `archive_tags`, `archive_folders`, `smart_folders`.
 
@@ -73,5 +74,29 @@ CSS custom properties only — no CSS-in-JS library. Dark theme variables define
 - **Natural sort**: `natord` crate used for page ordering within archives (ch1, ch2... ch10)
 - **Smart folders**: Conditions stored as JSON in `smart_folders.conditions` column, evaluated at query time in `queries.rs`
 - **Spread view**: `viewerStore.computeStep()` accounts for cover-alone setting and `is_spread` flag per page when advancing pages
-- **Virtualization**: `react-virtuoso` `VirtuosoGrid` for the archive grid — avoid layout changes that break virtual item sizing
+- **Virtualization**: `react-virtuoso` `VirtuosoGrid` for the archive grid — `GridList` and `GridItem` components **must be defined outside the parent component function** (at module scope), or VirtuosoGrid recreates them on every render causing scroll position loss
 - **Error type**: All Rust errors funnel through `AppError` enum in `error.rs`, serialized to string for frontend
+
+## Tauri-Specific Gotchas
+
+### Drag and Drop (`dragDropEnabled`)
+
+**Critical**: Tauri v2 defaults `dragDropEnabled: true`, which registers a native OS-level DnD handler that **completely suppresses HTML5 DOM drag events** (`dragstart`, `dragover`, `drop`) in the WebView. To use any React/HTML5 DnD, the window must have `"dragDropEnabled": false` in `tauri.conf.json`:
+
+```json
+{
+  "app": {
+    "windows": [{ "dragDropEnabled": false, ... }]
+  }
+}
+```
+
+With `dragDropEnabled: false`, the `tauri://drag-drop` / `tauri://drag-enter` events no longer fire — external OS file drops must be handled via HTML5 `drop` event on `window` or `document` instead.
+
+### Asset Protocol
+
+Images from the local filesystem are served via `http://asset.localhost/` on Windows. Use `convertFileSrc(absolutePath)` from `@tauri-apps/api/core` to convert filesystem paths to loadable URLs — do not construct the URL manually.
+
+### IPC Camelcase Conversion
+
+Tauri v2 converts top-level camelCase parameter names to snake_case automatically (e.g., `folderId` → `folder_id`). This conversion does **not** apply to nested objects — nested struct fields must already be snake_case or match the Rust struct's serde field names exactly.
