@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ArchiveDetail, PageInfo, ViewerArchive } from '../types';
+import type { ArchiveDetail, PageInfo, ViewerArchive, ViewerSettings } from '../types';
 import { tauriInvoke } from '../hooks/useTauriCommand';
 
 // ============================================================
@@ -26,6 +26,8 @@ interface ViewerState {
   loading: boolean;
   error: string | null;
   sidebarOpen: boolean;
+  /** Moire reduction blur intensity in px (0-2, persisted). */
+  moireReduction: number;
 
   // --- actions ---
   openArchive: (archiveId: string) => Promise<void>;
@@ -37,6 +39,9 @@ interface ViewerState {
   setPageOrder: (order: PageOrder) => void;
   setCoverAlone: (value: boolean) => void;
   toggleSidebar: () => void;
+  setMoireReduction: (value: number) => void;
+  saveMoireReduction: (value: number) => void;
+  loadSettings: () => Promise<void>;
 }
 
 /**
@@ -82,6 +87,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   loading: false,
   error: null,
   sidebarOpen: false,
+  moireReduction: 0.5,
 
   openArchive: async (archiveId) => {
     set({ loading: true, error: null });
@@ -134,4 +140,21 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   setPageOrder: (order) => set({ pageOrder: order }),
   setCoverAlone: (value) => set({ coverAlone: value }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
+
+  setMoireReduction: (value) => set({ moireReduction: value }),
+
+  saveMoireReduction: (value) => {
+    tauriInvoke('save_viewer_settings', {
+      settings: { moire_reduction: value },
+    }).catch(() => {});
+  },
+
+  loadSettings: async () => {
+    try {
+      const settings = await tauriInvoke<ViewerSettings>('get_viewer_settings');
+      set({ moireReduction: settings.moire_reduction });
+    } catch {
+      // コマンド未登録時はデフォルト値を使用
+    }
+  },
 }));

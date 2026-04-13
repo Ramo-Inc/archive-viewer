@@ -92,3 +92,8 @@ export interface PageInfo {
   /** Whether this page should be displayed as a spread (double-width). */
   is_spread: boolean;
 }
+
+/** Viewer display settings (persisted to config.json). */
+export interface ViewerSettings {
+  moire_reduction: number;
+}
