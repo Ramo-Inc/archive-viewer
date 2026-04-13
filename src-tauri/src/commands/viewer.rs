@@ -120,7 +120,7 @@ fn extract_to_cache(
     Ok(page_infos)
 }
 
-/// ページ準備: アーカイブ内の全ページを一時ディレクトリに展開
+/// ページ準備: キャッシュがあれば即返却、なければ展開してキャッシュ保存
 /// CR-1: Zip Slip対策付き (パストラバーサル防止)
 #[tauri::command]
 pub fn prepare_pages(
@@ -128,12 +128,30 @@ pub fn prepare_pages(
     archive_id: String,
 ) -> Result<Vec<PageInfo>, AppError> {
     let library_path = config::get_library_root()?;
+
+    // キャッシュディレクトリ: archives/{archive_id}/pages/
+    // DB アクセスせずに archive_id から直接パスを構築（キャッシュヒット時の高速パス）
+    let pages_dir = library_path
+        .join("archives")
+        .join(&archive_id)
+        .join("pages");
+
+    // --- キャッシュヒットチェック ---
+    if let Some(page_infos) = try_load_cache(&pages_dir) {
+        return Ok(page_infos);
+    }
+
+    // --- キャッシュミス: DB からアーカイブ情報を取得して展開 ---
     let guard = state.0.lock().map_err(|e| AppError::Database(e.to_string()))?;
     let conn = guard.as_ref().ok_or(AppError::LibraryNotFound)?;
-
     let archive_record = queries::get_archive_by_id(conn, &archive_id)?;
-    let archive_full_path = library_path.join(&archive_record.file_path);
 
+    // 壊れたキャッシュがあれば削除
+    if pages_dir.exists() {
+        let _ = std::fs::remove_dir_all(&pages_dir);
+    }
+
+    let archive_full_path = library_path.join(&archive_record.file_path);
     let reader = archive::open_archive(
         archive_full_path
             .to_str()
@@ -142,70 +160,16 @@ pub fn prepare_pages(
 
     let pages = reader.list_pages()?;
 
-    // セッション固有の一時ディレクトリを作成
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let temp_dir = library_path.join("temp").join(&session_id);
-    std::fs::create_dir_all(&temp_dir)?;
+    std::fs::create_dir_all(&pages_dir)?;
 
-    // canonicalizeでベースパスを確定
-    let temp_dir_canonical = temp_dir
-        .canonicalize()
-        .map_err(|e| AppError::FileIO(format!("一時ディレクトリ正規化失敗: {}", e)))?;
-
-    let mut page_infos = Vec::new();
-
-    for (idx, page) in pages.iter().enumerate() {
-        let page_data = reader.extract_page(&page.name)?;
-
-        // ファイル名のみ取得 (パストラバーサル防止)
-        let safe_filename = std::path::Path::new(&page.name)
-            .file_name()
-            .ok_or_else(|| {
-                AppError::Archive(format!("不正なページ名: {}", page.name))
-            })?;
-
-        let page_path = temp_dir.join(format!("{}_{}", idx, safe_filename.to_string_lossy()));
-
-        // Zip Slip対策: canonicalizeでパストラバーサルを検出
-        // ファイル書き込み前にパスチェック
-        {
-            // 親ディレクトリまでの存在を確認(ファイル自体はまだない)
-            let parent = page_path
-                .parent()
-                .ok_or_else(|| AppError::FileIO("無効な出力パス".to_string()))?;
-            let parent_canonical = parent
-                .canonicalize()
-                .map_err(|e| AppError::FileIO(format!("パス正規化失敗: {}", e)))?;
-            if !parent_canonical.starts_with(&temp_dir_canonical) {
-                return Err(AppError::Archive(format!(
-                    "パストラバーサル検出: {}",
-                    page.name
-                )));
-            }
+    match extract_to_cache(&pages_dir, &*reader, &pages) {
+        Ok(page_infos) => Ok(page_infos),
+        Err(e) => {
+            // 展開失敗時はキャッシュを削除
+            let _ = std::fs::remove_dir_all(&pages_dir);
+            Err(e)
         }
-
-        std::fs::write(&page_path, &page_data)?;
-
-        // 画像サイズ取得
-        let (width, height) = thumbnail::get_image_dimensions(&page_data)
-            .unwrap_or((0, 0));
-        let is_spread = thumbnail::is_spread_page(width, height);
-
-        // ファイルパスをそのまま返す (フロントエンドでconvertFileSrcを使用)
-        let url = page_path
-            .to_string_lossy()
-            .replace('\\', "/");
-
-        page_infos.push(PageInfo {
-            index: idx,
-            url,
-            width,
-            height,
-            is_spread,
-        });
     }
-
-    Ok(page_infos)
 }
 
 /// 読書位置を保存
