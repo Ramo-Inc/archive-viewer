@@ -21,9 +21,6 @@ interface ViewerOverlayProps {
   onPageChange: (page: number) => void;
   onNext: () => void;
   onPrev: () => void;
-  moireReduction: number;
-  onMoireChange: (value: number) => void;
-  onMoireCommit: (value: number) => void;
 }
 
 /** Threshold in pixels from the edge of the screen. */
@@ -43,9 +40,6 @@ export default function ViewerOverlay({
   onPageChange,
   onNext,
   onPrev,
-  moireReduction,
-  onMoireChange,
-  onMoireCommit,
 }: ViewerOverlayProps) {
   const [showTopBar, setShowTopBar] = useState(false);
   const [showSlider, setShowSlider] = useState(false);
@@ -148,9 +142,6 @@ export default function ViewerOverlay({
         onBack={onBack}
         onToggleViewMode={onToggleViewMode}
         visible={topBarVisible}
-        moireReduction={moireReduction}
-        onMoireChange={onMoireChange}
-        onMoireCommit={onMoireCommit}
       />
 
       {/* Bottom slider overlay */}

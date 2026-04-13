@@ -1,6 +1,5 @@
 import { convertFileSrc } from '@tauri-apps/api/core';
 import type { PageInfo } from '../../types';
-import { useViewerStore } from '../../stores/viewerStore';
 
 // ============================================================
 // SpreadView — displays one or two pages depending on viewMode
@@ -28,20 +27,17 @@ function pageUrl(page: PageInfo): string {
   return convertFileSrc(raw);
 }
 
-/** Build shared img style with conditional moire reduction blur. */
-function pageStyle(moireReduction: number, maxWidth: string): React.CSSProperties {
+/** Build shared img style. */
+function pageStyle(maxWidth: string): React.CSSProperties {
   return {
     maxWidth,
     maxHeight: '100%',
     objectFit: 'contain',
     imageRendering: 'smooth' as const,
-    ...(moireReduction > 0 ? { filter: `blur(${moireReduction}px)` } : {}),
   };
 }
 
 export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewProps) {
-  const moireReduction = useViewerStore((s) => s.moireReduction);
-
   if (pages.length === 0) {
     return (
       <div
@@ -76,7 +72,7 @@ export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewP
         <img
           src={pageUrl(currentPageInfo)}
           alt={`Page ${currentPage + 1}`}
-          style={pageStyle(moireReduction, '100%')}
+          style={pageStyle('100%')}
           draggable={false}
         />
       </div>
@@ -109,7 +105,7 @@ export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewP
         <img
           src={pageUrl(currentPageInfo)}
           alt={`Page ${currentPage + 1}`}
-          style={pageStyle(moireReduction, '100%')}
+          style={pageStyle('100%')}
           draggable={false}
         />
       </div>
@@ -137,14 +133,14 @@ export default function SpreadView({ pages, currentPage, viewMode }: SpreadViewP
       <img
         src={pageUrl(rightPage)}
         alt={`Page ${currentPage + 1}`}
-        style={pageStyle(moireReduction, '50%')}
+        style={pageStyle('50%')}
         draggable={false}
       />
       {leftPage && (
         <img
           src={pageUrl(leftPage)}
           alt={`Page ${currentPage + 2}`}
-          style={pageStyle(moireReduction, '50%')}
+          style={pageStyle('50%')}
           draggable={false}
         />
       )}
