@@ -304,6 +304,25 @@ export default function Sidebar() {
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(new Set());
   const [expandedSmartFolderIds, setExpandedSmartFolderIds] = useState<Set<string>>(new Set());
 
+  const [creatingSubfolderId, setCreatingSubfolderId] = useState<string | null>(null);
+  const [newSubfolderName, setNewSubfolderName] = useState('');
+  const [creatingSfSubfolderId, setCreatingSfSubfolderId] = useState<string | null>(null);
+
+  const startRootFolderCreate = useCallback(() => {
+    setCreatingFolder(true);
+    setNewFolderName('');
+    setCreatingSubfolderId(null);
+    setNewSubfolderName('');
+  }, []);
+
+  const startSubfolderCreate = useCallback((parentId: string) => {
+    setCreatingFolder(false);
+    setNewFolderName('');
+    setCreatingSubfolderId(parentId);
+    setNewSubfolderName('');
+    setExpandedFolderIds((prev) => new Set([...prev, parentId]));
+  }, []);
+
   const toggleFolderExpand = useCallback((folderId: string) => {
     setExpandedFolderIds((prev) => {
       const next = new Set(prev);
@@ -382,6 +401,26 @@ export default function Sidebar() {
     setNewFolderName('');
   }, [newFolderName, fetchFolders, addToast]);
 
+  // --- Subfolder create ---
+  const handleCreateSubfolder = useCallback(async () => {
+    const trimmed = newSubfolderName.trim();
+    if (!trimmed || !creatingSubfolderId) {
+      setCreatingSubfolderId(null);
+      setNewSubfolderName('');
+      return;
+    }
+    try {
+      await tauriInvoke('create_folder', { name: trimmed, parentId: creatingSubfolderId });
+      await fetchFolders();
+      setExpandedFolderIds((prev) => new Set([...prev, creatingSubfolderId!]));
+      addToast(`サブフォルダ「${trimmed}」を作成しました`, 'success');
+    } catch (e) {
+      addToast(`サブフォルダ作成失敗: ${String(e)}`, 'error');
+    }
+    setCreatingSubfolderId(null);
+    setNewSubfolderName('');
+  }, [newSubfolderName, creatingSubfolderId, fetchFolders, addToast]);
+
   // --- Folder rename ---
   const handleRenameCommit = useCallback(
     async (folderId: string, newName: string) => {
@@ -402,7 +441,8 @@ export default function Sidebar() {
       try {
         await tauriInvoke('delete_folder', { id: folderId });
         await fetchFolders();
-        if (filter.folder_id === folderId) {
+        const currentFolders = useLibraryStore.getState().folders;
+        if (filter.folder_id && !currentFolders.find(f => f.id === filter.folder_id)) {
           resetFilter();
         }
         addToast('フォルダを削除しました', 'success');
@@ -417,16 +457,26 @@ export default function Sidebar() {
   const handleFolderContextMenu = useCallback(
     (e: React.MouseEvent, folder: Folder) => {
       e.preventDefault();
-      setContextMenu({
-        x: e.clientX,
-        y: e.clientY,
-        items: [
-          { label: '名前変更', onClick: () => setEditingFolderId(folder.id) },
-          { label: '削除', onClick: () => handleDeleteFolder(folder.id), separator: true },
-        ],
-      });
+      let depth = 0;
+      let currentPid = folder.parent_id;
+      const folderMap = new Map(folders.map(f => [f.id, f]));
+      while (currentPid) {
+        depth++;
+        const parent = folderMap.get(currentPid);
+        currentPid = parent?.parent_id ?? null;
+      }
+      const items: MenuItem[] = [];
+      if (depth < 2) {
+        items.push({
+          label: 'サブフォルダを作成',
+          onClick: () => startSubfolderCreate(folder.id),
+        });
+      }
+      items.push({ label: '名前変更', onClick: () => setEditingFolderId(folder.id) });
+      items.push({ label: '削除', onClick: () => handleDeleteFolder(folder.id), separator: true });
+      setContextMenu({ x: e.clientX, y: e.clientY, items });
     },
-    [handleDeleteFolder],
+    [handleDeleteFolder, folders, startSubfolderCreate],
   );
 
   // --- Smart folder select ---
@@ -443,7 +493,8 @@ export default function Sidebar() {
       try {
         await tauriInvoke('delete_smart_folder', { id: sfId });
         await fetchSmartFolders();
-        if (filter.smart_folder_id === sfId) {
+        const currentSfs = useLibraryStore.getState().smartFolders;
+        if (filter.smart_folder_id && !currentSfs.find(sf => sf.id === filter.smart_folder_id)) {
           resetFilter();
         }
         addToast('スマートフォルダを削除しました', 'success');
@@ -458,22 +509,34 @@ export default function Sidebar() {
   const handleSmartFolderContextMenu = useCallback(
     (e: React.MouseEvent, sf: SmartFolder) => {
       e.preventDefault();
-      setContextMenu({
-        x: e.clientX,
-        y: e.clientY,
-        items: [
-          {
-            label: '編集',
-            onClick: () => {
-              setEditingSmartFolder(sf);
-              setShowSmartFolderEditor(true);
-            },
+      let depth = 0;
+      let currentPid = sf.parent_id;
+      const sfMap = new Map(smartFolders.map(s => [s.id, s]));
+      while (currentPid) {
+        depth++;
+        const parent = sfMap.get(currentPid);
+        currentPid = parent?.parent_id ?? null;
+      }
+      const items: MenuItem[] = [];
+      if (depth < 2) {
+        items.push({
+          label: 'サブスマートフォルダを作成',
+          onClick: () => {
+            setCreatingSfSubfolderId(sf.id);
+            setEditingSmartFolder(undefined);
+            setShowSmartFolderEditor(true);
+            setExpandedSmartFolderIds((prev) => new Set([...prev, sf.id]));
           },
-          { label: '削除', onClick: () => handleDeleteSmartFolder(sf.id), separator: true },
-        ],
+        });
+      }
+      items.push({
+        label: '編集',
+        onClick: () => { setEditingSmartFolder(sf); setShowSmartFolderEditor(true); },
       });
+      items.push({ label: '削除', onClick: () => handleDeleteSmartFolder(sf.id), separator: true });
+      setContextMenu({ x: e.clientX, y: e.clientY, items });
     },
-    [handleDeleteSmartFolder],
+    [handleDeleteSmartFolder, smartFolders],
   );
 
   // --- Drag & Drop on folders ---
@@ -559,7 +622,7 @@ export default function Sidebar() {
         <span>フォルダ</span>
         <button
           style={addButtonStyle}
-          onClick={() => { setCreatingFolder(true); setNewFolderName(''); }}
+          onClick={startRootFolderCreate}
           title="フォルダを作成"
         >
           +
@@ -594,28 +657,58 @@ export default function Sidebar() {
 
       {(() => {
         function renderFolderNodes(nodes: FolderNode[]): React.ReactNode {
-          return nodes.map((node) => (
-            <div key={node.folder.id}>
-              <FolderItem
-                folder={node.folder}
-                depth={node.depth}
-                hasChildren={node.children.length > 0}
-                isExpanded={expandedFolderIds.has(node.folder.id)}
-                activeFolderId={filter.folder_id}
-                isEditing={editingFolderId === node.folder.id}
-                isDropTarget={dropTargetFolderId === node.folder.id}
-                onSelect={handleFolderSelect}
-                onToggleExpand={toggleFolderExpand}
-                onContextMenu={handleFolderContextMenu}
-                onRenameCommit={handleRenameCommit}
-                onRenameCancel={() => setEditingFolderId(null)}
-                onDragOver={handleFolderDragOver}
-                onDragLeave={handleFolderDragLeave}
-                onDrop={handleFolderDrop}
-              />
-              {expandedFolderIds.has(node.folder.id) && node.children.length > 0 && renderFolderNodes(node.children)}
-            </div>
-          ));
+          return nodes.map((node) => {
+            const hasRealChildren = node.children.length > 0;
+            const isCreatingChild = creatingSubfolderId === node.folder.id;
+            const hasChildren = hasRealChildren || isCreatingChild;
+            return (
+              <div key={node.folder.id}>
+                <FolderItem
+                  folder={node.folder}
+                  depth={node.depth}
+                  hasChildren={hasChildren}
+                  isExpanded={expandedFolderIds.has(node.folder.id)}
+                  activeFolderId={filter.folder_id}
+                  isEditing={editingFolderId === node.folder.id}
+                  isDropTarget={dropTargetFolderId === node.folder.id}
+                  onSelect={handleFolderSelect}
+                  onToggleExpand={toggleFolderExpand}
+                  onContextMenu={handleFolderContextMenu}
+                  onRenameCommit={handleRenameCommit}
+                  onRenameCancel={() => setEditingFolderId(null)}
+                  onDragOver={handleFolderDragOver}
+                  onDragLeave={handleFolderDragLeave}
+                  onDrop={handleFolderDrop}
+                />
+                {expandedFolderIds.has(node.folder.id) && hasRealChildren && renderFolderNodes(node.children)}
+                {isCreatingChild && (
+                  <div style={{ padding: '4px 10px', paddingLeft: 12 + (node.depth + 1) * 16 }}>
+                    <input
+                      autoFocus
+                      value={newSubfolderName}
+                      onChange={(e) => setNewSubfolderName(e.target.value)}
+                      onBlur={handleCreateSubfolder}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleCreateSubfolder();
+                        if (e.key === 'Escape') { setCreatingSubfolderId(null); setNewSubfolderName(''); }
+                      }}
+                      placeholder="サブフォルダ名"
+                      style={{
+                        width: '100%',
+                        padding: '4px 8px',
+                        fontSize: 13,
+                        borderRadius: 4,
+                        border: '1px solid var(--accent)',
+                        background: 'var(--bg-tertiary)',
+                        color: 'var(--text-primary)',
+                        outline: 'none',
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          });
         }
         return renderFolderNodes(folderTree);
       })()}
@@ -625,7 +718,7 @@ export default function Sidebar() {
         <span>スマートフォルダ</span>
         <button
           style={addButtonStyle}
-          onClick={() => { setEditingSmartFolder(undefined); setShowSmartFolderEditor(true); }}
+          onClick={() => { setEditingSmartFolder(undefined); setCreatingSfSubfolderId(null); setShowSmartFolderEditor(true); }}
           title="スマートフォルダを作成"
         >
           +
@@ -721,7 +814,8 @@ export default function Sidebar() {
       {showSmartFolderEditor && (
         <SmartFolderEditor
           existing={editingSmartFolder}
-          onClose={() => setShowSmartFolderEditor(false)}
+          parentId={creatingSfSubfolderId}
+          onClose={() => { setShowSmartFolderEditor(false); setCreatingSfSubfolderId(null); }}
         />
       )}
     </aside>
