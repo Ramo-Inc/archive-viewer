@@ -56,6 +56,12 @@ pub fn create_folder(
 ) -> Result<Folder, AppError> {
     let guard = state.0.lock().map_err(|e| AppError::Database(e.to_string()))?;
     let conn = guard.as_ref().ok_or(AppError::LibraryNotFound)?;
+    if let Some(ref pid) = parent_id {
+        let parent_depth = queries::get_folder_depth(conn, pid)?;
+        if parent_depth >= 2 {
+            return Err(AppError::Validation("最大3階層までです".to_string()));
+        }
+    }
     queries::create_folder(conn, &name, parent_id.as_deref())
 }
 
@@ -71,7 +77,7 @@ pub fn rename_folder(
     queries::rename_folder(conn, &id, &name)
 }
 
-/// フォルダを削除
+/// フォルダを削除（子フォルダも再帰的に削除）
 #[tauri::command]
 pub fn delete_folder(
     state: State<'_, DbState>,
@@ -79,7 +85,7 @@ pub fn delete_folder(
 ) -> Result<(), AppError> {
     let guard = state.0.lock().map_err(|e| AppError::Database(e.to_string()))?;
     let conn = guard.as_ref().ok_or(AppError::LibraryNotFound)?;
-    queries::delete_folder(conn, &id)
+    queries::delete_folder_recursive(conn, &id)
 }
 
 /// タグ一覧を取得
@@ -150,10 +156,17 @@ pub fn create_smart_folder(
     state: State<'_, DbState>,
     name: String,
     conditions: String,
+    parent_id: Option<String>,
 ) -> Result<SmartFolder, AppError> {
     let guard = state.0.lock().map_err(|e| AppError::Database(e.to_string()))?;
     let conn = guard.as_ref().ok_or(AppError::LibraryNotFound)?;
-    queries::create_smart_folder(conn, &name, &conditions)
+    if let Some(ref pid) = parent_id {
+        let parent_depth = queries::get_smart_folder_depth(conn, pid)?;
+        if parent_depth >= 2 {
+            return Err(AppError::Validation("最大3階層までです".to_string()));
+        }
+    }
+    queries::create_smart_folder_with_parent(conn, &name, &conditions, parent_id.as_deref())
 }
 
 /// スマートフォルダを更新
@@ -169,7 +182,7 @@ pub fn update_smart_folder(
     queries::update_smart_folder(conn, &id, &name, &conditions)
 }
 
-/// スマートフォルダを削除
+/// スマートフォルダを削除（子フォルダも再帰的に削除）
 #[tauri::command]
 pub fn delete_smart_folder(
     state: State<'_, DbState>,
@@ -177,5 +190,5 @@ pub fn delete_smart_folder(
 ) -> Result<(), AppError> {
     let guard = state.0.lock().map_err(|e| AppError::Database(e.to_string()))?;
     let conn = guard.as_ref().ok_or(AppError::LibraryNotFound)?;
-    queries::delete_smart_folder(conn, &id)
+    queries::delete_smart_folder_recursive(conn, &id)
 }
