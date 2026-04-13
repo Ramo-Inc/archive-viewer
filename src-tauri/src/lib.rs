@@ -35,31 +35,7 @@ pub fn run() {
                         std::path::PathBuf::from(lib_path).join("comicviewer.db");
                     if let Some(db_path_str) = db_path.to_str() {
                         let state: State<'_, DbState> = app.state::<DbState>();
-                        if state.init(db_path_str).is_ok() {
-                            // 起動時整合性チェック
-                            let lib_path_buf = std::path::PathBuf::from(lib_path);
-                            if let Ok(guard) = state.0.lock() {
-                                if let Some(ref conn) = *guard {
-                                    let _ =
-                                        library::integrity::check_integrity(conn, &lib_path_buf);
-
-                                    // 起動時に古い temp/ ディレクトリをクリーンアップ
-                                    let temp_dir = lib_path_buf.join("temp");
-                                    if temp_dir.exists() {
-                                        if let Ok(entries) = std::fs::read_dir(&temp_dir) {
-                                            for entry in entries.flatten() {
-                                                let path = entry.path();
-                                                if path.is_dir() {
-                                                    let _ = std::fs::remove_dir_all(&path);
-                                                } else {
-                                                    let _ = std::fs::remove_file(&path);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        let _ = state.init(db_path_str);
                     }
                 }
             }
