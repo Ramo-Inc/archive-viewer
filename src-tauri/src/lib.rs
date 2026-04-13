@@ -94,6 +94,8 @@ pub fn run() {
             commands::viewer::prepare_pages,
             commands::viewer::save_read_position,
             commands::viewer::cleanup_temp_pages,
+            commands::viewer::get_viewer_settings,
+            commands::viewer::save_viewer_settings,
             // drag_drop commands
             commands::drag_drop::import_dropped_files,
             commands::drag_drop::handle_internal_drag,
