@@ -35,33 +35,40 @@ export default function CanvasPage({
       return;
     }
 
-    const containerWidth = container.clientWidth * maxWidthRatio;
-    const containerHeight = container.clientHeight;
-    if (containerWidth <= 0 || containerHeight <= 0) return;
+    const containerW = container.clientWidth;
+    const containerH = container.clientHeight;
+    if (containerW <= 0 || containerH <= 0) return;
 
-    // objectFit: contain equivalent — fit to container preserving aspect ratio
-    const scaleX = containerWidth / naturalWidth;
-    const scaleY = containerHeight / naturalHeight;
+    // objectFit: contain equivalent
+    const scaleX = containerW / naturalWidth;
+    const scaleY = containerH / naturalHeight;
     const scale = Math.min(scaleX, scaleY);
 
     const displayWidth = Math.floor(naturalWidth * scale);
     const displayHeight = Math.floor(naturalHeight * scale);
-
     if (displayWidth <= 0 || displayHeight <= 0) return;
 
-    // Only resize canvas buffer if dimensions changed
-    if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
-      canvas.width = displayWidth;
-      canvas.height = displayHeight;
+    // devicePixelRatio: render at physical pixel resolution
+    const dpr = window.devicePixelRatio || 1;
+    const bufferWidth = Math.floor(displayWidth * dpr);
+    const bufferHeight = Math.floor(displayHeight * dpr);
+
+    if (canvas.width !== bufferWidth || canvas.height !== bufferHeight) {
+      canvas.width = bufferWidth;
+      canvas.height = bufferHeight;
     }
+
+    // Set CSS size to logical pixels (canvas buffer is physical pixels)
+    canvas.style.width = displayWidth + 'px';
+    canvas.style.height = displayHeight + 'px';
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, 0, 0, displayWidth, displayHeight);
-  }, [naturalWidth, naturalHeight, maxWidthRatio]);
+    ctx.drawImage(img, 0, 0, bufferWidth, bufferHeight);
+  }, [naturalWidth, naturalHeight]);
 
   // Load image and draw when src changes
   useEffect(() => {
@@ -109,6 +116,14 @@ export default function CanvasPage({
     return () => observer.disconnect();
   }, [draw]);
 
+  // Redraw on DPI change (e.g., window moved between monitors)
+  useEffect(() => {
+    const mql = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    const handleChange = () => draw();
+    mql.addEventListener('change', handleChange, { once: true });
+    return () => mql.removeEventListener('change', handleChange);
+  }, [draw]);
+
   // Redraw when maxWidthRatio changes (spread ↔ single toggle)
   useEffect(() => {
     draw();
@@ -118,12 +133,13 @@ export default function CanvasPage({
     <div
       ref={containerRef}
       style={{
-        flex: maxWidthRatio === 0.5 ? 1 : undefined,
+        flex: 1,
         maxWidth: maxWidthRatio === 1.0 ? '100%' : '50%',
         height: '100%',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
+        overflow: 'hidden',
       }}
     >
       <canvas
