@@ -45,25 +45,19 @@ export default function ViewerPage() {
   const nextPage = useViewerStore((s) => s.nextPage);
   const prevPage = useViewerStore((s) => s.prevPage);
   const goToPage = useViewerStore((s) => s.goToPage);
-  const moireReduction = useViewerStore((s) => s.moireReduction);
-  const setMoireReduction = useViewerStore((s) => s.setMoireReduction);
-  const saveMoireReduction = useViewerStore((s) => s.saveMoireReduction);
-  const loadSettings = useViewerStore((s) => s.loadSettings);
 
   // UI visibility toggle (for Space key)
   const [isUIVisible, setIsUIVisible] = useState(false);
 
   // --- Initial load ---
   useEffect(() => {
-    loadSettings();
     if (archiveId) {
       openArchive(archiveId);
     }
-    // Errata HI-7: no async cleanup — navigation only via handleBack
     return () => {
       closeArchive();
     };
-  }, [archiveId, openArchive, closeArchive, loadSettings]);
+  }, [archiveId, openArchive, closeArchive]);
 
   // --- Resume from last read page ---
   // The archive.last_read_at or similar field could carry the position.
@@ -216,9 +210,6 @@ export default function ViewerPage() {
         onPageChange={goToPage}
         onNext={nextPage}
         onPrev={prevPage}
-        moireReduction={moireReduction}
-        onMoireChange={setMoireReduction}
-        onMoireCommit={saveMoireReduction}
       />
     </div>
   );

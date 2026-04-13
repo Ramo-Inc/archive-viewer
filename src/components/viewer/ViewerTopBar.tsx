@@ -11,9 +11,6 @@ interface ViewerTopBarProps {
   onBack: () => void;
   onToggleViewMode: () => void;
   visible: boolean;
-  moireReduction: number;
-  onMoireChange: (value: number) => void;
-  onMoireCommit: (value: number) => void;
 }
 
 export default function ViewerTopBar({
@@ -24,9 +21,6 @@ export default function ViewerTopBar({
   onBack,
   onToggleViewMode,
   visible,
-  moireReduction,
-  onMoireChange,
-  onMoireCommit,
 }: ViewerTopBarProps) {
   return (
     <div
@@ -77,42 +71,6 @@ export default function ViewerTopBar({
       >
         {title}
       </span>
-
-      {/* Moire reduction slider */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          whiteSpace: 'nowrap',
-        }}
-      >
-        <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>
-          モアレ軽減
-        </span>
-        <input
-          type="range"
-          min="0"
-          max="2"
-          step="0.1"
-          value={moireReduction}
-          onChange={(e) =>
-            onMoireChange(parseFloat(e.target.value))
-          }
-          onMouseUp={(e) =>
-            onMoireCommit(parseFloat((e.target as HTMLInputElement).value))
-          }
-          style={{
-            width: 80,
-            height: 4,
-            cursor: 'pointer',
-            accentColor: 'var(--accent)',
-          }}
-        />
-        <span style={{ color: 'var(--text-muted)', fontSize: 11, minWidth: 24 }}>
-          {moireReduction.toFixed(1)}
-        </span>
-      </div>
 
       <button
         onClick={onToggleViewMode}
