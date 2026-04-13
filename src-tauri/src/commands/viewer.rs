@@ -45,11 +45,33 @@ fn try_load_cache(pages_dir: &std::path::Path) -> Option<Vec<PageInfo>> {
     Some(page_infos)
 }
 
+/// 画像データを target_height に Lanczos3 でリサイズして返す
+/// target_height >= height の場合はリサイズせず元データを返す（アップスケール防止）
+/// 元画像のフォーマットを維持（JPEG→JPEG 95, それ以外→PNG）
+fn resize_page_data(data: &[u8], _width: u32, height: u32, target_height: u32) -> Result<Vec<u8>, AppError> {
+    if target_height >= height {
+        return Ok(data.to_vec());
+    }
+    let img = image::load_from_memory(data)
+        .map_err(|e| AppError::FileIO(format!("画像デコード失敗: {}", e)))?;
+    let resized = img.resize(u32::MAX, target_height, image::imageops::FilterType::Lanczos3);
+    let mut buf = Vec::new();
+    if data.len() >= 2 && data[0] == 0xFF && data[1] == 0xD8 {
+        resized.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Jpeg)
+            .map_err(|e| AppError::FileIO(format!("画像エンコード失敗: {}", e)))?;
+    } else {
+        resized.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+            .map_err(|e| AppError::FileIO(format!("画像エンコード失敗: {}", e)))?;
+    }
+    Ok(buf)
+}
+
 /// アーカイブページをキャッシュディレクトリに展開し、meta.json を書き出す
 fn extract_to_cache(
     pages_dir: &std::path::Path,
     reader: &dyn archive::ArchiveReader,
     pages: &[archive::ArchivePageEntry],
+    target_height: Option<u32>,
 ) -> Result<Vec<PageInfo>, AppError> {
     let pages_dir_canonical = pages_dir
         .canonicalize()
@@ -86,11 +108,29 @@ fn extract_to_cache(
             }
         }
 
-        std::fs::write(&page_path, &page_data)?;
-
-        let (width, height) = thumbnail::get_image_dimensions(&page_data)
+        // 画像サイズ取得（リサイズ前の元サイズ）
+        let (orig_width, orig_height) = thumbnail::get_image_dimensions(&page_data)
             .unwrap_or((0, 0));
-        let is_spread = thumbnail::is_spread_page(width, height);
+        // is_spread は元画像サイズで判定
+        let is_spread = thumbnail::is_spread_page(orig_width, orig_height);
+
+        // target_height 指定時、元画像が大きければ Lanczos3 リサイズ
+        let final_data = if let Some(th) = target_height {
+            if orig_height > th && orig_height > 0 {
+                resize_page_data(&page_data, orig_width, orig_height, th)
+                    .unwrap_or(page_data)
+            } else {
+                page_data
+            }
+        } else {
+            page_data
+        };
+
+        std::fs::write(&page_path, &final_data)?;
+
+        // リサイズ後の実際のサイズを取得
+        let (width, height) = thumbnail::get_image_dimensions(&final_data)
+            .unwrap_or((orig_width, orig_height));
 
         let url = page_path
             .to_string_lossy()
@@ -126,6 +166,7 @@ fn extract_to_cache(
 pub fn prepare_pages(
     state: State<'_, DbState>,
     archive_id: String,
+    target_height: Option<u32>,
 ) -> Result<Vec<PageInfo>, AppError> {
     let library_path = config::get_library_root()?;
 
@@ -152,6 +193,16 @@ pub fn prepare_pages(
     }
 
     let archive_full_path = library_path.join(&archive_record.file_path);
+
+    // missing フラグ遅延検出
+    if !archive_full_path.exists() {
+        let _ = queries::set_archive_missing(conn, &archive_id, true);
+        return Err(AppError::FileIO(format!(
+            "アーカイブファイルが見つかりません: {}",
+            archive_record.file_path
+        )));
+    }
+
     let reader = archive::open_archive(
         archive_full_path
             .to_str()
@@ -162,7 +213,7 @@ pub fn prepare_pages(
 
     std::fs::create_dir_all(&pages_dir)?;
 
-    match extract_to_cache(&pages_dir, &*reader, &pages) {
+    match extract_to_cache(&pages_dir, &*reader, &pages, target_height) {
         Ok(page_infos) => Ok(page_infos),
         Err(e) => {
             // 展開失敗時はキャッシュを削除
@@ -370,7 +421,7 @@ mod tests {
         let pages_dir = tmp.path().join("pages");
         std::fs::create_dir_all(&pages_dir).unwrap();
 
-        let result = extract_to_cache(&pages_dir, &*reader, &pages);
+        let result = extract_to_cache(&pages_dir, &*reader, &pages, None);
         assert!(result.is_ok());
         let infos = result.unwrap();
 
@@ -441,5 +492,49 @@ mod tests {
 
         let loaded = config::load_config_from(&config_file).unwrap();
         assert!((loaded.viewer_settings.moire_reduction - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_resize_page_data_downscale() {
+        let img = image::RgbImage::new(100, 150);
+        let mut png_data = Vec::new();
+        let encoder = image::codecs::png::PngEncoder::new(&mut png_data);
+        image::ImageEncoder::write_image(
+            encoder,
+            img.as_raw(),
+            100,
+            150,
+            image::ExtendedColorType::Rgb8,
+        )
+        .unwrap();
+
+        let result = resize_page_data(&png_data, 100, 150, 75);
+        assert!(result.is_ok());
+        let resized_data = result.unwrap();
+        let (w, h) = thumbnail::get_image_dimensions(&resized_data).unwrap();
+        assert_eq!(h, 75);
+        assert_eq!(w, 50);
+    }
+
+    #[test]
+    fn test_resize_page_data_no_upscale() {
+        let img = image::RgbImage::new(100, 150);
+        let mut png_data = Vec::new();
+        let encoder = image::codecs::png::PngEncoder::new(&mut png_data);
+        image::ImageEncoder::write_image(
+            encoder,
+            img.as_raw(),
+            100,
+            150,
+            image::ExtendedColorType::Rgb8,
+        )
+        .unwrap();
+
+        let result = resize_page_data(&png_data, 100, 150, 300);
+        assert!(result.is_ok());
+        let resized = result.unwrap();
+        let (w, h) = thumbnail::get_image_dimensions(&resized).unwrap();
+        assert_eq!(w, 100);
+        assert_eq!(h, 150);
     }
 }
