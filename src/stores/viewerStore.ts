@@ -90,9 +90,11 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
       const detail = await tauriInvoke<ArchiveDetail>('get_archive_detail', {
         id: archiveIdStr,
       });
-      // 2. Prepare pages (extract to temp dir)
+      // 2. Prepare pages with Lanczos3 pre-resize to display height
+      const targetHeight = Math.floor(window.innerHeight * (window.devicePixelRatio || 1));
       const pages = await tauriInvoke<PageInfo[]>('prepare_pages', {
         archiveId: archiveIdStr,
+        targetHeight,
       });
       // 3. Assemble ViewerArchive
       const archive: ViewerArchive = { ...detail, pages };
