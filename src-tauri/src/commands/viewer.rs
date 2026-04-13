@@ -45,6 +45,81 @@ fn try_load_cache(pages_dir: &std::path::Path) -> Option<Vec<PageInfo>> {
     Some(page_infos)
 }
 
+/// アーカイブページをキャッシュディレクトリに展開し、meta.json を書き出す
+fn extract_to_cache(
+    pages_dir: &std::path::Path,
+    reader: &dyn archive::ArchiveReader,
+    pages: &[archive::ArchivePageEntry],
+) -> Result<Vec<PageInfo>, AppError> {
+    let pages_dir_canonical = pages_dir
+        .canonicalize()
+        .map_err(|e| AppError::FileIO(format!("キャッシュディレクトリ正規化失敗: {}", e)))?;
+
+    let mut page_infos = Vec::new();
+    let mut cached_metas = Vec::new();
+
+    for (idx, page) in pages.iter().enumerate() {
+        let page_data = reader.extract_page(&page.name)?;
+
+        let safe_filename = std::path::Path::new(&page.name)
+            .file_name()
+            .ok_or_else(|| {
+                AppError::Archive(format!("不正なページ名: {}", page.name))
+            })?;
+
+        let file_name = format!("{:03}_{}", idx, safe_filename.to_string_lossy());
+        let page_path = pages_dir.join(&file_name);
+
+        // Zip Slip対策
+        {
+            let parent = page_path
+                .parent()
+                .ok_or_else(|| AppError::FileIO("無効な出力パス".to_string()))?;
+            let parent_canonical = parent
+                .canonicalize()
+                .map_err(|e| AppError::FileIO(format!("パス正規化失敗: {}", e)))?;
+            if !parent_canonical.starts_with(&pages_dir_canonical) {
+                return Err(AppError::Archive(format!(
+                    "パストラバーサル検出: {}",
+                    page.name
+                )));
+            }
+        }
+
+        std::fs::write(&page_path, &page_data)?;
+
+        let (width, height) = thumbnail::get_image_dimensions(&page_data)
+            .unwrap_or((0, 0));
+        let is_spread = thumbnail::is_spread_page(width, height);
+
+        let url = page_path
+            .to_string_lossy()
+            .replace('\\', "/");
+
+        page_infos.push(PageInfo {
+            index: idx,
+            url,
+            width,
+            height,
+            is_spread,
+        });
+
+        cached_metas.push(CachedPageMeta {
+            index: idx,
+            file_name,
+            width,
+            height,
+            is_spread,
+        });
+    }
+
+    // meta.json を最後に書き込み（展開完了の目印）
+    let meta_json = serde_json::to_string_pretty(&cached_metas)?;
+    std::fs::write(pages_dir.join("meta.json"), meta_json)?;
+
+    Ok(page_infos)
+}
+
 /// ページ準備: アーカイブ内の全ページを一時ディレクトリに展開
 /// CR-1: Zip Slip対策付き (パストラバーサル防止)
 #[tauri::command]
@@ -266,5 +341,75 @@ mod tests {
         let result = try_load_cache(tmp.path());
         assert!(result.is_some());
         assert_eq!(result.unwrap().len(), 0);
+    }
+
+    fn create_test_zip(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+        use std::io::Write;
+        let zip_path = dir.join(name);
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip_writer = zip::ZipWriter::new(file);
+
+        // Create a small PNG image
+        let img = image::RgbImage::new(100, 150);
+        let mut png_data = Vec::new();
+        let encoder = image::codecs::png::PngEncoder::new(&mut png_data);
+        image::ImageEncoder::write_image(
+            encoder,
+            img.as_raw(),
+            100,
+            150,
+            image::ExtendedColorType::Rgb8,
+        )
+        .unwrap();
+
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip_writer.start_file("page001.png", options).unwrap();
+        zip_writer.write_all(&png_data).unwrap();
+        zip_writer.start_file("page002.png", options).unwrap();
+        zip_writer.write_all(&png_data).unwrap();
+        zip_writer.finish().unwrap();
+        zip_path
+    }
+
+    #[test]
+    fn test_extract_to_cache_creates_pages_and_meta() {
+        let tmp = TempDir::new().unwrap();
+        let zip_path = create_test_zip(tmp.path(), "test.cbz");
+        let reader = archive::open_archive(zip_path.to_str().unwrap()).unwrap();
+        let pages = reader.list_pages().unwrap();
+
+        let pages_dir = tmp.path().join("pages");
+        std::fs::create_dir_all(&pages_dir).unwrap();
+
+        let result = extract_to_cache(&pages_dir, &*reader, &pages);
+        assert!(result.is_ok());
+        let infos = result.unwrap();
+
+        // Check 2 pages extracted
+        assert_eq!(infos.len(), 2);
+        assert_eq!(infos[0].index, 0);
+        assert_eq!(infos[1].index, 1);
+        assert_eq!(infos[0].width, 100);
+        assert_eq!(infos[0].height, 150);
+        assert!(!infos[0].is_spread);
+
+        // Check meta.json was written
+        let meta_path = pages_dir.join("meta.json");
+        assert!(meta_path.exists());
+
+        // Check meta.json is valid and can be loaded by try_load_cache
+        let cached_result = try_load_cache(&pages_dir);
+        assert!(cached_result.is_some());
+        let cached_infos = cached_result.unwrap();
+        assert_eq!(cached_infos.len(), 2);
+
+        // Check page files exist with 3-digit prefix
+        let entries: Vec<_> = std::fs::read_dir(&pages_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".png"))
+            .collect();
+        assert_eq!(entries.len(), 2);
     }
 }
