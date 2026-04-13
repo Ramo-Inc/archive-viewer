@@ -342,7 +342,7 @@ pub fn get_folders_for_archive(
 
 pub fn get_smart_folders(conn: &Connection) -> Result<Vec<SmartFolder>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, conditions, sort_order, created_at FROM smart_folders ORDER BY sort_order",
+        "SELECT id, name, conditions, sort_order, parent_id, created_at FROM smart_folders ORDER BY sort_order",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(SmartFolder {
@@ -350,7 +350,8 @@ pub fn get_smart_folders(conn: &Connection) -> Result<Vec<SmartFolder>, AppError
             name: row.get(1)?,
             conditions: row.get(2)?,
             sort_order: row.get(3)?,
-            created_at: row.get(4)?,
+            parent_id: row.get(4)?,
+            created_at: row.get(5)?,
         })
     })?;
     let mut results = Vec::new();
@@ -362,7 +363,7 @@ pub fn get_smart_folders(conn: &Connection) -> Result<Vec<SmartFolder>, AppError
 
 pub fn get_smart_folder_by_id(conn: &Connection, id: &str) -> Result<SmartFolder, AppError> {
     conn.query_row(
-        "SELECT id, name, conditions, sort_order, created_at FROM smart_folders WHERE id = ?1",
+        "SELECT id, name, conditions, sort_order, parent_id, created_at FROM smart_folders WHERE id = ?1",
         params![id],
         |row| {
             Ok(SmartFolder {
@@ -370,7 +371,8 @@ pub fn get_smart_folder_by_id(conn: &Connection, id: &str) -> Result<SmartFolder
                 name: row.get(1)?,
                 conditions: row.get(2)?,
                 sort_order: row.get(3)?,
-                created_at: row.get(4)?,
+                parent_id: row.get(4)?,
+                created_at: row.get(5)?,
             })
         },
     )
@@ -398,6 +400,7 @@ pub fn create_smart_folder(
         name: name.to_string(),
         conditions: conditions.to_string(),
         sort_order: 0,
+        parent_id: None,
         created_at: now,
     })
 }

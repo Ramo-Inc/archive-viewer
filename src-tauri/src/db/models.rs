@@ -91,6 +91,7 @@ pub struct SmartFolder {
     pub name: String,
     pub conditions: String,
     pub sort_order: i32,
+    pub parent_id: Option<String>,
     pub created_at: String,
 }
 
@@ -231,6 +232,7 @@ mod tests {
             name: "Favorites".to_string(),
             conditions: r#"{"match":"all","rules":[]}"#.to_string(),
             sort_order: 0,
+            parent_id: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
         };
 
@@ -321,6 +323,36 @@ mod tests {
         assert_eq!(deserialized.tags.len(), 1);
         assert_eq!(deserialized.folders.len(), 1);
         assert!(!deserialized.missing);
+    }
+
+    #[test]
+    fn test_smart_folder_with_parent_id() {
+        let sf = SmartFolder {
+            id: "sf-child".to_string(),
+            name: "Child".to_string(),
+            conditions: r#"{"match":"all","rules":[]}"#.to_string(),
+            sort_order: 0,
+            parent_id: Some("sf-parent".to_string()),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        let json = serde_json::to_string(&sf).unwrap();
+        let deserialized: SmartFolder = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.parent_id, Some("sf-parent".to_string()));
+    }
+
+    #[test]
+    fn test_smart_folder_without_parent_id() {
+        let sf = SmartFolder {
+            id: "sf-root".to_string(),
+            name: "Root".to_string(),
+            conditions: r#"{"match":"all","rules":[]}"#.to_string(),
+            sort_order: 0,
+            parent_id: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        let json = serde_json::to_string(&sf).unwrap();
+        let deserialized: SmartFolder = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.parent_id.is_none());
     }
 
     #[test]
