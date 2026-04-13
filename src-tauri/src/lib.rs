@@ -42,6 +42,21 @@ pub fn run() {
                                 if let Some(ref conn) = *guard {
                                     let _ =
                                         library::integrity::check_integrity(conn, &lib_path_buf);
+
+                                    // 起動時に古い temp/ ディレクトリをクリーンアップ
+                                    let temp_dir = lib_path_buf.join("temp");
+                                    if temp_dir.exists() {
+                                        if let Ok(entries) = std::fs::read_dir(&temp_dir) {
+                                            for entry in entries.flatten() {
+                                                let path = entry.path();
+                                                if path.is_dir() {
+                                                    let _ = std::fs::remove_dir_all(&path);
+                                                } else {
+                                                    let _ = std::fs::remove_file(&path);
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
