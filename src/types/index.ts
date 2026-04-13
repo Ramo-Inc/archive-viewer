@@ -72,6 +72,7 @@ export interface SmartFolder {
   name: string;
   conditions: string;
   sort_order: number;
+  parent_id: string | null;
   created_at: string;
 }
 
