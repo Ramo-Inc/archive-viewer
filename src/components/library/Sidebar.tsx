@@ -5,6 +5,7 @@ import { tauriInvoke } from '../../hooks/useTauriCommand';
 import { dragState } from '../../stores/dragState';
 import ContextMenu, { type MenuItem } from '../common/ContextMenu';
 import SmartFolderEditor from './SmartFolderEditor';
+import SettingsModal from '../common/SettingsModal';
 import type { Folder, SmartFolder } from '../../types';
 
 // ============================================================
@@ -827,6 +828,11 @@ export default function Sidebar() {
           parentId={creatingSfSubfolderId}
           onClose={() => { setShowSmartFolderEditor(false); setCreatingSfSubfolderId(null); }}
         />
+      )}
+
+      {/* Settings modal */}
+      {showSettingsModal && (
+        <SettingsModal onClose={() => setShowSettingsModal(false)} />
       )}
     </aside>
   );
