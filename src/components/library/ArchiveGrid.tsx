@@ -82,24 +82,28 @@ export default function ArchiveGrid({ onOpenViewer }: ArchiveGridProps) {
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, archiveId: string) => {
+      const selectedIds = useLibraryStore.getState().selectedArchiveIds;
+      const targetIds = selectedIds.has(archiveId)
+        ? Array.from(selectedIds)
+        : [archiveId];
+
       const items: MenuItem[] = [
         { label: '読む', onClick: () => onOpenViewer(archiveId) },
       ];
 
-      // Add folder items if folders exist
       if (folders.length > 0) {
         for (const folder of folders) {
           items.push({
             label: `→ ${folder.name}`,
-            separator: items.length === 1, // separator before first folder
+            separator: items.length === 1,
             onClick: async () => {
               try {
                 await tauriInvoke('move_archives_to_folder', {
-                  archiveIds: [archiveId],
+                  archiveIds: targetIds,
                   folderId: folder.id,
                 });
                 await fetchArchives();
-                addToast(`「${folder.name}」に追加しました`, 'success');
+                addToast(`${targetIds.length}件を「${folder.name}」に追加しました`, 'success');
               } catch (err) {
                 addToast(`フォルダ追加失敗: ${String(err)}`, 'error');
               }
@@ -109,15 +113,18 @@ export default function ArchiveGrid({ onOpenViewer }: ArchiveGridProps) {
       }
 
       items.push({
-        label: '削除',
+        label: targetIds.length > 1 ? `${targetIds.length}件を削除` : '削除',
         separator: true,
         onClick: async () => {
-          if (!window.confirm('このアーカイブを削除しますか？')) return;
+          const msg = targetIds.length > 1
+            ? `${targetIds.length}件のアーカイブを削除しますか？`
+            : 'このアーカイブを削除しますか？';
+          if (!window.confirm(msg)) return;
           try {
-            await tauriInvoke('delete_archives', { ids: [archiveId] });
+            await tauriInvoke('delete_archives', { ids: targetIds });
             clearSelection();
             await fetchArchives();
-            addToast('アーカイブを削除しました', 'success');
+            addToast(`${targetIds.length}件を削除しました`, 'success');
           } catch (err) {
             addToast(`削除失敗: ${String(err)}`, 'error');
           }
