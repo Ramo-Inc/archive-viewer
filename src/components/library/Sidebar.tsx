@@ -290,6 +290,7 @@ export default function Sidebar() {
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
   const [showSmartFolderEditor, setShowSmartFolderEditor] = useState(false);
   const [editingSmartFolder, setEditingSmartFolder] = useState<SmartFolder | undefined>(undefined);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
 
   const folderTree = useMemo(() => buildFolderTree(folders), [folders]);
   const smartFolderTree = useMemo(() => buildSmartFolderTree(smartFolders), [smartFolders]);
@@ -581,13 +582,13 @@ export default function Sidebar() {
         minWidth: 220,
         background: 'var(--bg-secondary)',
         borderRight: '1px solid var(--border-color)',
-        overflowY: 'auto',
-        padding: '8px 6px',
         display: 'flex',
         flexDirection: 'column',
         flexShrink: 0,
       }}
     >
+      {/* Scrollable content area */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 6px', display: 'flex', flexDirection: 'column' }}>
       {/* Preset filters */}
       <div style={{ ...sectionTitleStyle, justifyContent: 'flex-start' }}>ライブラリ</div>
       <SidebarItem label="すべて" icon="📚" active={isPresetActive('all')} onClick={() => handlePreset('all')} />
@@ -773,6 +774,41 @@ export default function Sidebar() {
 
       {/* Bottom spacer */}
       <div style={{ flex: 1 }} />
+      </div>
+
+      {/* Fixed footer — always visible */}
+      <div
+        style={{
+          padding: '8px 12px',
+          borderTop: '1px solid var(--border-color)',
+          flexShrink: 0,
+        }}
+      >
+        <div
+          onClick={() => setShowSettingsModal(true)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '4px 6px',
+            borderRadius: 4,
+            cursor: 'pointer',
+            fontSize: 13,
+            color: 'var(--text-dim)',
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLElement).style.background = 'var(--bg-hover)';
+            (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)';
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLElement).style.background = 'transparent';
+            (e.currentTarget as HTMLElement).style.color = 'var(--text-dim)';
+          }}
+        >
+          <span style={{ fontSize: 15 }}>&#9881;</span>
+          <span>設定</span>
+        </div>
+      </div>
 
       {/* Context menu */}
       {contextMenu && (
