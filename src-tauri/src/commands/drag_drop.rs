@@ -125,21 +125,31 @@ pub fn handle_internal_drag(
     match target {
         DragTarget::Folder(folder_id) => {
             // True move: remove from all current folders, then add to target.
+            let tx = conn
+                .unchecked_transaction()
+                .map_err(|e| AppError::Database(e.to_string()))?;
             for archive_id in &archive_ids {
-                queries::remove_archive_from_all_folders(conn, archive_id)?;
+                queries::remove_archive_from_all_folders(&tx, archive_id)?;
             }
-            queries::move_archives_to_folder(conn, &archive_ids, &folder_id)?;
+            queries::move_archives_to_folder(&tx, &archive_ids, &folder_id)?;
+            tx.commit()
+                .map_err(|e| AppError::Database(e.to_string()))?;
         }
         DragTarget::Tag(tag_id) => {
             // 各アーカイブにタグを追加 (既存タグを保持)
+            let tx = conn
+                .unchecked_transaction()
+                .map_err(|e| AppError::Database(e.to_string()))?;
             for archive_id in &archive_ids {
-                let existing_tags = queries::get_tags_for_archive(conn, archive_id)?;
+                let existing_tags = queries::get_tags_for_archive(&tx, archive_id)?;
                 let mut tag_ids: Vec<String> = existing_tags.iter().map(|t| t.id.clone()).collect();
                 if !tag_ids.contains(&tag_id) {
                     tag_ids.push(tag_id.clone());
                 }
-                queries::set_archive_tags(conn, archive_id, &tag_ids)?;
+                queries::set_archive_tags(&tx, archive_id, &tag_ids)?;
             }
+            tx.commit()
+                .map_err(|e| AppError::Database(e.to_string()))?;
         }
         DragTarget::SmartFolder(_) => {
             // スマートフォルダはルールベースなのでドラッグ操作なし
