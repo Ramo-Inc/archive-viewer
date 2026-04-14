@@ -59,6 +59,21 @@ export default function DetailPanel({ onOpenViewer }: DetailPanelProps) {
     return convertFileSrc(`${libraryPath}/${thumb}`);
   }, [detail?.thumbnail_path, libraryPath]);
 
+  const folderMap = useMemo(() => new Map(folders.map((f) => [f.id, f])), [folders]);
+
+  const buildFolderPath = useCallback(
+    (folderId: string): string => {
+      const parts: string[] = [];
+      let current = folderMap.get(folderId);
+      while (current) {
+        parts.unshift(current.name);
+        current = current.parent_id ? folderMap.get(current.parent_id) : undefined;
+      }
+      return parts.join(' › ');
+    },
+    [folderMap],
+  );
+
   // --- Handlers ---
 
   const handleRankChange = useCallback(async (newRank: number) => {
@@ -267,10 +282,12 @@ export default function DetailPanel({ onOpenViewer }: DetailPanelProps) {
 
       {/* Folder membership */}
       <div style={labelStyle}>フォルダ</div>
-      <div style={valueStyle}>
+      <div style={{ ...valueStyle, display: 'flex', flexDirection: 'column', gap: 2 }}>
         {detail.folders.length === 0
           ? 'なし'
-          : detail.folders.map((f) => f.name).join(', ')}
+          : detail.folders.map((f) => (
+              <span key={f.id}>{buildFolderPath(f.id)}</span>
+            ))}
       </div>
 
       {/* File info */}

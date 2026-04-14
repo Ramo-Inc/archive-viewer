@@ -459,7 +459,7 @@ export default function Sidebar() {
         currentPid = parent?.parent_id ?? null;
       }
       const items: MenuItem[] = [];
-      if (depth < 2) {
+      if (depth < 4) {
         items.push({
           label: 'サブフォルダを作成',
           onClick: () => startSubfolderCreate(folder.id),
@@ -511,7 +511,7 @@ export default function Sidebar() {
         currentPid = parent?.parent_id ?? null;
       }
       const items: MenuItem[] = [];
-      if (depth < 2) {
+      if (depth < 4) {
         items.push({
           label: 'サブスマートフォルダを作成',
           onClick: () => {

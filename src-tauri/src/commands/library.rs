@@ -58,8 +58,8 @@ pub fn create_folder(
     let conn = guard.as_ref().ok_or(AppError::LibraryNotFound)?;
     if let Some(ref pid) = parent_id {
         let parent_depth = queries::get_folder_depth(conn, pid)?;
-        if parent_depth >= 2 {
-            return Err(AppError::Validation("最大3階層までです".to_string()));
+        if parent_depth >= 4 {
+            return Err(AppError::Validation("最大5階層までです".to_string()));
         }
     }
     queries::create_folder(conn, &name, parent_id.as_deref())
@@ -162,8 +162,8 @@ pub fn create_smart_folder(
     let conn = guard.as_ref().ok_or(AppError::LibraryNotFound)?;
     if let Some(ref pid) = parent_id {
         let parent_depth = queries::get_smart_folder_depth(conn, pid)?;
-        if parent_depth >= 2 {
-            return Err(AppError::Validation("最大3階層までです".to_string()));
+        if parent_depth >= 4 {
+            return Err(AppError::Validation("最大5階層までです".to_string()));
         }
     }
     queries::create_smart_folder_with_parent(conn, &name, &conditions, parent_id.as_deref())
