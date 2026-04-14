@@ -117,10 +117,10 @@ export default function ArchiveCard({ archive, libraryPath, onDoubleClick, onCon
         if (ids.length > 1) {
           const badge = document.createElement('div');
           badge.style.cssText =
-            'position:absolute;top:-8px;right:-8px;' +
-            'background:var(--accent);color:#fff;border-radius:10px;' +
-            'font-size:11px;font-weight:700;padding:2px 6px;' +
-            'min-width:18px;text-align:center;line-height:1.4;';
+            'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);' +
+            'background:rgba(0,0,0,0.7);color:#fff;border-radius:12px;' +
+            'font-size:16px;font-weight:700;padding:4px 10px;' +
+            'min-width:24px;text-align:center;line-height:1.3;';
           badge.textContent = String(ids.length);
           thumb.appendChild(badge);
         }
