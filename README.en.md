@@ -4,6 +4,19 @@
 
 A desktop manga/comic archive viewer for Windows, built with Tauri 2 + React 19 + Rust.
 
+<br>
+
+<p align="center">
+  <img src="public/img2.png" width="100%" alt="Library view">
+</p>
+
+<p align="center">
+  <img src="public/img1.png" width="49%" alt="Setup wizard">
+  <img src="public/img3.png" width="49%" alt="Viewer">
+</p>
+
+<br>
+
 ## Features
 
 - **Archive support** — ZIP (`.cbz`, `.zip`) and RAR (`.cbr`, `.rar`) files

@@ -4,6 +4,19 @@
 
 Windows 向けのデスクトップ漫画・コミックアーカイブビューア。Tauri 2 + React 19 + Rust で構築しています。
 
+<br>
+
+<p align="center">
+  <img src="public/img2.png" width="100%" alt="ライブラリ画面">
+</p>
+
+<p align="center">
+  <img src="public/img1.png" width="49%" alt="セットアップ画面">
+  <img src="public/img3.png" width="49%" alt="ビューア画面">
+</p>
+
+<br>
+
 ## 機能
 
 - **アーカイブ対応** — ZIP (`.cbz`, `.zip`) および RAR (`.cbr`, `.rar`) ファイルを直接読み込み
