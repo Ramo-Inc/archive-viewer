@@ -83,6 +83,26 @@ pub fn get_archive_by_id(conn: &Connection, id: &str) -> Result<Archive, AppErro
     .map_err(|e| AppError::Database(e.to_string()))
 }
 
+pub fn get_all_archive_paths(conn: &Connection) -> Result<Vec<(String, String, String)>, AppError> {
+    let mut stmt = conn.prepare("SELECT id, file_path, format FROM archives")?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    })?;
+    let mut results = Vec::new();
+    for row in rows {
+        results.push(row?);
+    }
+    Ok(results)
+}
+
+pub fn update_thumbnail_path(conn: &Connection, id: &str, path: Option<&str>) -> Result<(), AppError> {
+    conn.execute(
+        "UPDATE archives SET thumbnail_path = ?1 WHERE id = ?2",
+        params![path, id],
+    )?;
+    Ok(())
+}
+
 pub fn get_archive_detail(conn: &Connection, id: &str) -> Result<ArchiveDetail, AppError> {
     let archive = get_archive_by_id(conn, id)?;
     let tags = get_tags_for_archive(conn, id)?;
@@ -1637,5 +1657,73 @@ mod tests {
         // Only a1 matches (has shounen tag + rank 5). a2 has rank 5 but no shounen tag.
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "a1");
+    }
+
+    // === Backup query tests ===
+
+    #[test]
+    fn test_get_all_archive_paths_empty() {
+        let conn = setup_db();
+        let paths = get_all_archive_paths(&conn).unwrap();
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn test_get_all_archive_paths_returns_id_filepath_format() {
+        let conn = setup_db();
+        insert_archive(&conn, &Archive {
+            id: "a1".to_string(),
+            title: "Comic1".to_string(),
+            file_name: "comic1.cbz".to_string(),
+            file_path: "archives/a1/comic1.cbz".to_string(),
+            file_size: 1024,
+            page_count: 10,
+            format: "zip".to_string(),
+            thumbnail_path: Some("thumbnails/a1.jpg".to_string()),
+            rank: 0,
+            memo: "".to_string(),
+            is_read: false,
+            last_read_page: 0,
+            missing: false,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }).unwrap();
+        let paths = get_all_archive_paths(&conn).unwrap();
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].0, "a1");
+        assert_eq!(paths[0].1, "archives/a1/comic1.cbz");
+        assert_eq!(paths[0].2, "zip");
+    }
+
+    #[test]
+    fn test_update_thumbnail_path_set() {
+        let conn = setup_db();
+        insert_archive(&conn, &Archive {
+            id: "a1".to_string(), title: "Comic1".to_string(),
+            file_name: "comic1.cbz".to_string(), file_path: "archives/a1/comic1.cbz".to_string(),
+            file_size: 1024, page_count: 10, format: "zip".to_string(),
+            thumbnail_path: None, rank: 0, memo: "".to_string(),
+            is_read: false, last_read_page: 0, missing: false,
+            created_at: "2026-01-01T00:00:00Z".to_string(), updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }).unwrap();
+        update_thumbnail_path(&conn, "a1", Some("thumbnails/a1.jpg")).unwrap();
+        let archive = get_archive_by_id(&conn, "a1").unwrap();
+        assert_eq!(archive.thumbnail_path, Some("thumbnails/a1.jpg".to_string()));
+    }
+
+    #[test]
+    fn test_update_thumbnail_path_clear() {
+        let conn = setup_db();
+        insert_archive(&conn, &Archive {
+            id: "a1".to_string(), title: "Comic1".to_string(),
+            file_name: "comic1.cbz".to_string(), file_path: "archives/a1/comic1.cbz".to_string(),
+            file_size: 1024, page_count: 10, format: "zip".to_string(),
+            thumbnail_path: Some("thumbnails/a1.jpg".to_string()), rank: 0, memo: "".to_string(),
+            is_read: false, last_read_page: 0, missing: false,
+            created_at: "2026-01-01T00:00:00Z".to_string(), updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }).unwrap();
+        update_thumbnail_path(&conn, "a1", None).unwrap();
+        let archive = get_archive_by_id(&conn, "a1").unwrap();
+        assert!(archive.thumbnail_path.is_none());
     }
 }
