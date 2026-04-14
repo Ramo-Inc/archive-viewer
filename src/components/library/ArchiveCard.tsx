@@ -76,12 +76,55 @@ export default function ArchiveCard({ archive, libraryPath, onDoubleClick, onCon
 
       let dragStarted = false;
       let highlightedEl: HTMLElement | null = null;
+      let ghostEl: HTMLElement | null = null;
 
       // Find the nearest element with data-folder-id under the given coords.
       const getFolderEl = (x: number, y: number): HTMLElement | null => {
         const el = document.elementFromPoint(x, y);
         if (!el) return null;
         return (el as HTMLElement).closest('[data-folder-id]') as HTMLElement | null;
+      };
+
+      // Build a small floating thumbnail that follows the cursor.
+      const createGhost = (x: number, y: number): HTMLElement => {
+        const ghost = document.createElement('div');
+        ghost.style.cssText = `position:fixed;left:${x + 14}px;top:${y + 14}px;pointer-events:none;z-index:9999;opacity:0.92;`;
+
+        // Thumbnail card (position:relative for the badge)
+        const thumb = document.createElement('div');
+        thumb.style.cssText =
+          'position:relative;width:72px;height:96px;border-radius:6px;' +
+          'overflow:hidden;border:2px solid var(--accent);background:var(--bg-card);' +
+          'display:flex;align-items:center;justify-content:center;' +
+          'box-shadow:0 4px 20px rgba(0,0,0,0.6);';
+
+        if (thumbnailUrl) {
+          const img = document.createElement('img');
+          img.src = thumbnailUrl;
+          img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
+          thumb.appendChild(img);
+        } else {
+          const icon = document.createElement('span');
+          icon.style.cssText = 'font-size:28px;';
+          icon.textContent = '📄';
+          thumb.appendChild(icon);
+        }
+
+        // Badge showing count when multiple archives are dragged
+        if (ids.length > 1) {
+          const badge = document.createElement('div');
+          badge.style.cssText =
+            'position:absolute;top:-8px;right:-8px;' +
+            'background:var(--accent);color:#fff;border-radius:10px;' +
+            'font-size:11px;font-weight:700;padding:2px 6px;' +
+            'min-width:18px;text-align:center;line-height:1.4;';
+          badge.textContent = String(ids.length);
+          thumb.appendChild(badge);
+        }
+
+        ghost.appendChild(thumb);
+        document.body.appendChild(ghost);
+        return ghost;
       };
 
       const handleMouseMove = (me: MouseEvent) => {
@@ -93,6 +136,13 @@ export default function ArchiveCard({ archive, libraryPath, onDoubleClick, onCon
           document.body.style.cursor = 'grabbing';
           document.body.style.userSelect = 'none';
           cardEl.style.opacity = '0.5';
+          ghostEl = createGhost(me.clientX, me.clientY);
+        }
+
+        // Move ghost with cursor
+        if (ghostEl) {
+          ghostEl.style.left = `${me.clientX + 14}px`;
+          ghostEl.style.top = `${me.clientY + 14}px`;
         }
 
         // Highlight the folder element under the cursor via outline (non-destructive)
@@ -120,6 +170,10 @@ export default function ArchiveCard({ archive, libraryPath, onDoubleClick, onCon
           highlightedEl.style.outlineOffset = '';
           highlightedEl = null;
         }
+        if (ghostEl) {
+          ghostEl.remove();
+          ghostEl = null;
+        }
         if (dragStarted) {
           const targetEl = getFolderEl(ue.clientX, ue.clientY);
           if (targetEl) {
@@ -136,7 +190,7 @@ export default function ArchiveCard({ archive, libraryPath, onDoubleClick, onCon
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', cleanup);
     },
-    [archive.id, selectedArchiveIds],
+    [archive.id, selectedArchiveIds, thumbnailUrl],
   );
 
   return (
