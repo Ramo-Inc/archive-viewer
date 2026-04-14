@@ -297,6 +297,17 @@ pub fn remove_archive_from_folder(
     Ok(())
 }
 
+pub fn remove_archive_from_all_folders(
+    conn: &Connection,
+    archive_id: &str,
+) -> Result<(), AppError> {
+    conn.execute(
+        "DELETE FROM archive_folders WHERE archive_id = ?1",
+        params![archive_id],
+    )?;
+    Ok(())
+}
+
 // === Tags ===
 
 pub fn get_tags(conn: &Connection) -> Result<Vec<Tag>, AppError> {
@@ -989,6 +1000,32 @@ mod tests {
 
         let folders = get_folders_for_archive(&conn, "a1").unwrap();
         assert_eq!(folders.len(), 0);
+    }
+
+    #[test]
+    fn test_remove_archive_from_all_folders() {
+        let conn = setup_db();
+        insert_archive(&conn, &make_test_archive("a1", "Test")).unwrap();
+        let f1 = create_folder(&conn, "F1", None).unwrap();
+        let f2 = create_folder(&conn, "F2", None).unwrap();
+        move_archives_to_folder(&conn, &["a1".to_string()], &f1.id).unwrap();
+        move_archives_to_folder(&conn, &["a1".to_string()], &f2.id).unwrap();
+        assert_eq!(get_folders_for_archive(&conn, "a1").unwrap().len(), 2);
+
+        remove_archive_from_all_folders(&conn, "a1").unwrap();
+
+        assert!(get_folders_for_archive(&conn, "a1").unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_remove_archive_from_all_folders_noop_when_no_folders() {
+        let conn = setup_db();
+        insert_archive(&conn, &make_test_archive("a1", "Test")).unwrap();
+
+        // Should not error when archive has no folder associations
+        remove_archive_from_all_folders(&conn, "a1").unwrap();
+
+        assert!(get_folders_for_archive(&conn, "a1").unwrap().is_empty());
     }
 
     // === Tag Tests ===

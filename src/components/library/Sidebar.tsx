@@ -159,7 +159,6 @@ interface FolderItemProps {
   onContextMenu: (e: React.MouseEvent, folder: Folder) => void;
   onRenameCommit: (id: string, newName: string) => void;
   onRenameCancel: () => void;
-  onDropArchives: (folderId: string, archiveIds: string[]) => void;
 }
 
 function FolderItem({
@@ -174,11 +173,9 @@ function FolderItem({
   onContextMenu,
   onRenameCommit,
   onRenameCancel,
-  onDropArchives,
 }: FolderItemProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [editName, setEditName] = useState(folder.name);
-  const [isDragHover, setIsDragHover] = useState(false);
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -240,24 +237,12 @@ function FolderItem({
         }
       }}
       onMouseEnter={(e) => {
-        if (dragState.isDragging()) {
-          setIsDragHover(true);
-          return;
-        }
         if (activeFolderId !== folder.id)
           e.currentTarget.style.background = 'var(--bg-card)';
       }}
       onMouseLeave={(e) => {
-        setIsDragHover(false);
-        if (!dragState.isDragging())
-          e.currentTarget.style.background =
-            activeFolderId === folder.id ? 'var(--bg-hover)' : 'transparent';
-      }}
-      onMouseUp={() => {
-        if (!dragState.isDragging()) return;
-        const ids = [...dragState.getIds()];
-        setIsDragHover(false);
-        onDropArchives(folder.id, ids);
+        e.currentTarget.style.background =
+          activeFolderId === folder.id ? 'var(--bg-hover)' : 'transparent';
       }}
       style={{
         display: 'flex',
@@ -268,16 +253,8 @@ function FolderItem({
         borderRadius: 4,
         cursor: 'pointer',
         fontSize: 13,
-        background: isDragHover
-          ? 'var(--accent)'
-          : activeFolderId === folder.id
-            ? 'var(--bg-hover)'
-            : 'transparent',
-        color: isDragHover
-          ? '#fff'
-          : activeFolderId === folder.id
-            ? 'var(--text-primary)'
-            : 'var(--text-secondary)',
+        background: activeFolderId === folder.id ? 'var(--bg-hover)' : 'transparent',
+        color: activeFolderId === folder.id ? 'var(--text-primary)' : 'var(--text-secondary)',
         transition: 'background 0.15s',
       }}
     >
@@ -555,22 +532,24 @@ export default function Sidebar() {
     [handleDeleteSmartFolder, smartFolders],
   );
 
-  // --- Archive drop on folders (mouse-based, not HTML5 DnD) ---
-  const handleFolderDropArchives = useCallback(
-    async (folderId: string, archiveIds: string[]) => {
+  // --- Archive drop on folders ---
+  // Register drop handler in dragState so ArchiveCard's mouseup can trigger it.
+  // dragState.drop(folderId) is called when the mouse is released over a folder element.
+  useEffect(() => {
+    dragState.setDropHandler(async (folderId: string, archiveIds: string[]) => {
       try {
         await tauriInvoke('handle_internal_drag', {
           archiveIds,
           target: { Folder: folderId },
         });
         await fetchArchives();
-        addToast(`${archiveIds.length}件をフォルダに追加しました`, 'success');
+        addToast(`${archiveIds.length}件をフォルダに移動しました`, 'success');
       } catch (e) {
-        addToast(`フォルダ追加失敗: ${String(e)}`, 'error');
+        addToast(`フォルダ移動失敗: ${String(e)}`, 'error');
       }
-    },
-    [fetchArchives, addToast],
-  );
+    });
+    return () => dragState.clearDropHandler();
+  }, [fetchArchives, addToast]);
 
   // --- Styles ---
   const sectionTitleStyle: React.CSSProperties = {
@@ -674,7 +653,6 @@ export default function Sidebar() {
                   onContextMenu={handleFolderContextMenu}
                   onRenameCommit={handleRenameCommit}
                   onRenameCancel={() => setEditingFolderId(null)}
-                  onDropArchives={handleFolderDropArchives}
                 />
                 {expandedFolderIds.has(node.folder.id) && hasRealChildren && renderFolderNodes(node.children)}
                 {isCreatingChild && (

@@ -265,7 +265,18 @@ export default function DetailPanel({ onOpenViewer }: DetailPanelProps) {
         style={{ fontSize: 13, color: 'var(--text-primary)', background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', borderRadius: 4, padding: '6px 8px', resize: 'vertical', outline: 'none', marginBottom: 10, width: '100%' }}
       />
 
+      {/* Folder membership */}
+      <div style={labelStyle}>フォルダ</div>
+      <div style={valueStyle}>
+        {detail.folders.length === 0
+          ? 'なし'
+          : detail.folders.map((f) => f.name).join(', ')}
+      </div>
+
       {/* File info */}
+      <div style={labelStyle}>ファイル名</div>
+      <div style={{ ...valueStyle, wordBreak: 'break-all', fontSize: 12 }}>{detail.file_name}</div>
+
       <div style={labelStyle}>形式</div>
       <div style={valueStyle}>{detail.format.toUpperCase()}</div>
 

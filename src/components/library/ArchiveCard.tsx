@@ -66,18 +66,74 @@ export default function ArchiveCard({ archive, libraryPath, onDoubleClick, onCon
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if (e.button !== 0) return; // left click only
+
+      const startX = e.clientX;
+      const startY = e.clientY;
       const ids = selectedArchiveIds.has(archive.id)
         ? Array.from(selectedArchiveIds)
         : [archive.id];
-      dragState.start(ids);
-      document.body.style.cursor = 'grabbing';
-      document.body.style.userSelect = 'none';
-      const cleanup = () => {
-        dragState.end();
+      const cardEl = e.currentTarget as HTMLElement;
+
+      let dragStarted = false;
+      let highlightedEl: HTMLElement | null = null;
+
+      // Find the nearest element with data-folder-id under the given coords.
+      const getFolderEl = (x: number, y: number): HTMLElement | null => {
+        const el = document.elementFromPoint(x, y);
+        if (!el) return null;
+        return (el as HTMLElement).closest('[data-folder-id]') as HTMLElement | null;
+      };
+
+      const handleMouseMove = (me: MouseEvent) => {
+        if (!dragStarted) {
+          // Require at least 5px of movement before treating as drag
+          if (Math.hypot(me.clientX - startX, me.clientY - startY) < 5) return;
+          dragStarted = true;
+          dragState.start(ids);
+          document.body.style.cursor = 'grabbing';
+          document.body.style.userSelect = 'none';
+          cardEl.style.opacity = '0.5';
+        }
+
+        // Highlight the folder element under the cursor via outline (non-destructive)
+        const newEl = getFolderEl(me.clientX, me.clientY);
+        if (newEl === highlightedEl) return;
+        if (highlightedEl) {
+          highlightedEl.style.outline = '';
+          highlightedEl.style.outlineOffset = '';
+        }
+        if (newEl) {
+          newEl.style.outline = '2px solid var(--accent)';
+          newEl.style.outlineOffset = '-2px';
+        }
+        highlightedEl = newEl;
+      };
+
+      const cleanup = (ue: MouseEvent) => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', cleanup);
+        cardEl.style.opacity = '';
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
-        document.removeEventListener('mouseup', cleanup);
+        if (highlightedEl) {
+          highlightedEl.style.outline = '';
+          highlightedEl.style.outlineOffset = '';
+          highlightedEl = null;
+        }
+        if (dragStarted) {
+          const targetEl = getFolderEl(ue.clientX, ue.clientY);
+          if (targetEl) {
+            const folderId = targetEl.getAttribute('data-folder-id');
+            if (folderId) {
+              dragState.drop(folderId);
+              return;
+            }
+          }
+          dragState.end();
+        }
       };
+
+      document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', cleanup);
     },
     [archive.id, selectedArchiveIds],

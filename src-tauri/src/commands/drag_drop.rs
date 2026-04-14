@@ -34,6 +34,10 @@ pub fn handle_internal_drag(
 
     match target {
         DragTarget::Folder(folder_id) => {
+            // True move: remove from all current folders, then add to target.
+            for archive_id in &archive_ids {
+                queries::remove_archive_from_all_folders(conn, archive_id)?;
+            }
             queries::move_archives_to_folder(conn, &archive_ids, &folder_id)?;
         }
         DragTarget::Tag(tag_id) => {
