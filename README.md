@@ -1,7 +1,7 @@
 <h1 align="center">ArchiveViewer</h1>
 
 <p align="center">
-  手持ちのコミック・漫画アーカイブを、きれいに整理して、きれいに読む。
+  手持ちの画像アーカイブを、きれいに整理して、きれいに読む。
 </p>
 
 <p align="center">

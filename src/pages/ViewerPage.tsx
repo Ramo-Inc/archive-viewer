@@ -6,7 +6,7 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import ViewerOverlay from '../components/viewer/ViewerOverlay';
 
 // ============================================================
-// ViewerPage — full comic/manga reader.
+// ViewerPage — full image archive reader.
 // Loads archive, resumes last read position, provides keyboard
 // shortcuts, and manages save-on-exit.
 // Errata HI-7: no async calls from useEffect cleanup — all

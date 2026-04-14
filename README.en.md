@@ -1,7 +1,7 @@
 ﻿<h1 align="center">ArchiveViewer</h1>
 
 <p align="center">
-  Organize your comic archives. Read them beautifully.
+  Organize your image archives. Read them beautifully.
 </p>
 
 <p align="center">
