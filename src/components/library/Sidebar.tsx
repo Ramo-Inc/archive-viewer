@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useLibraryStore } from '../../stores/libraryStore';
 import { useToastStore } from '../../stores/toastStore';
 import { tauriInvoke } from '../../hooks/useTauriCommand';
+import { dragState } from '../../stores/dragState';
 import ContextMenu, { type MenuItem } from '../common/ContextMenu';
 import SmartFolderEditor from './SmartFolderEditor';
 import type { Folder, SmartFolder } from '../../types';
@@ -153,15 +154,12 @@ interface FolderItemProps {
   isExpanded: boolean;
   activeFolderId: string | null | undefined;
   isEditing: boolean;
-  isDropTarget: boolean;
   onSelect: (id: string | null) => void;
   onToggleExpand: (id: string) => void;
   onContextMenu: (e: React.MouseEvent, folder: Folder) => void;
   onRenameCommit: (id: string, newName: string) => void;
   onRenameCancel: () => void;
-  onDragOver: (e: React.DragEvent, folderId: string) => void;
-  onDragLeave: () => void;
-  onDrop: (e: React.DragEvent, folderId: string) => void;
+  onDropArchives: (folderId: string, archiveIds: string[]) => void;
 }
 
 function FolderItem({
@@ -171,18 +169,16 @@ function FolderItem({
   isExpanded,
   activeFolderId,
   isEditing,
-  isDropTarget,
   onSelect,
   onToggleExpand,
   onContextMenu,
   onRenameCommit,
   onRenameCancel,
-  onDragOver,
-  onDragLeave,
-  onDrop,
+  onDropArchives,
 }: FolderItemProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [editName, setEditName] = useState(folder.name);
+  const [isDragHover, setIsDragHover] = useState(false);
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -237,14 +233,31 @@ function FolderItem({
       data-folder-id={folder.id}
       onClick={() => onSelect(folder.id)}
       onContextMenu={(e) => onContextMenu(e, folder)}
-      onDragOver={(e) => onDragOver(e, folder.id)}
-      onDragLeave={onDragLeave}
-      onDrop={(e) => onDrop(e, folder.id)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           onSelect(folder.id);
         }
+      }}
+      onMouseEnter={(e) => {
+        if (dragState.isDragging()) {
+          setIsDragHover(true);
+          return;
+        }
+        if (activeFolderId !== folder.id)
+          e.currentTarget.style.background = 'var(--bg-card)';
+      }}
+      onMouseLeave={(e) => {
+        setIsDragHover(false);
+        if (!dragState.isDragging())
+          e.currentTarget.style.background =
+            activeFolderId === folder.id ? 'var(--bg-hover)' : 'transparent';
+      }}
+      onMouseUp={() => {
+        if (!dragState.isDragging()) return;
+        const ids = [...dragState.getIds()];
+        setIsDragHover(false);
+        onDropArchives(folder.id, ids);
       }}
       style={{
         display: 'flex',
@@ -255,26 +268,17 @@ function FolderItem({
         borderRadius: 4,
         cursor: 'pointer',
         fontSize: 13,
-        background: isDropTarget
+        background: isDragHover
           ? 'var(--accent)'
           : activeFolderId === folder.id
             ? 'var(--bg-hover)'
             : 'transparent',
-        color: isDropTarget
+        color: isDragHover
           ? '#fff'
           : activeFolderId === folder.id
             ? 'var(--text-primary)'
             : 'var(--text-secondary)',
         transition: 'background 0.15s',
-      }}
-      onMouseEnter={(e) => {
-        if (!isDropTarget && activeFolderId !== folder.id)
-          e.currentTarget.style.background = 'var(--bg-card)';
-      }}
-      onMouseLeave={(e) => {
-        if (!isDropTarget)
-          e.currentTarget.style.background =
-            activeFolderId === folder.id ? 'var(--bg-hover)' : 'transparent';
       }}
     >
       <span
@@ -307,7 +311,6 @@ export default function Sidebar() {
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
-  const [dropTargetFolderId, setDropTargetFolderId] = useState<string | null>(null);
   const [showSmartFolderEditor, setShowSmartFolderEditor] = useState(false);
   const [editingSmartFolder, setEditingSmartFolder] = useState<SmartFolder | undefined>(undefined);
 
@@ -552,27 +555,10 @@ export default function Sidebar() {
     [handleDeleteSmartFolder, smartFolders],
   );
 
-  // --- Drag & Drop on folders ---
-  const handleFolderDragOver = useCallback((e: React.DragEvent, folderId: string) => {
-    if (e.dataTransfer.types.includes('application/x-archive-ids')) {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      setDropTargetFolderId(folderId);
-    }
-  }, []);
-
-  const handleFolderDragLeave = useCallback(() => {
-    setDropTargetFolderId(null);
-  }, []);
-
-  const handleFolderDrop = useCallback(
-    async (e: React.DragEvent, folderId: string) => {
-      e.preventDefault();
-      setDropTargetFolderId(null);
-      const data = e.dataTransfer.getData('application/x-archive-ids');
-      if (!data) return;
+  // --- Archive drop on folders (mouse-based, not HTML5 DnD) ---
+  const handleFolderDropArchives = useCallback(
+    async (folderId: string, archiveIds: string[]) => {
       try {
-        const archiveIds: string[] = JSON.parse(data);
         await tauriInvoke('handle_internal_drag', {
           archiveIds,
           target: { Folder: folderId },
@@ -683,15 +669,12 @@ export default function Sidebar() {
                   isExpanded={expandedFolderIds.has(node.folder.id)}
                   activeFolderId={filter.folder_id}
                   isEditing={editingFolderId === node.folder.id}
-                  isDropTarget={dropTargetFolderId === node.folder.id}
                   onSelect={handleFolderSelect}
                   onToggleExpand={toggleFolderExpand}
                   onContextMenu={handleFolderContextMenu}
                   onRenameCommit={handleRenameCommit}
                   onRenameCancel={() => setEditingFolderId(null)}
-                  onDragOver={handleFolderDragOver}
-                  onDragLeave={handleFolderDragLeave}
-                  onDrop={handleFolderDrop}
+                  onDropArchives={handleFolderDropArchives}
                 />
                 {expandedFolderIds.has(node.folder.id) && hasRealChildren && renderFolderNodes(node.children)}
                 {isCreatingChild && (

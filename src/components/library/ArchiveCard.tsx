@@ -1,6 +1,7 @@
 import { useMemo, useCallback, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { useLibraryStore } from '../../stores/libraryStore';
+import { dragState } from '../../stores/dragState';
 import RankStars from '../common/RankStars';
 import type { ArchiveSummary } from '../../types';
 
@@ -62,13 +63,22 @@ export default function ArchiveCard({ archive, libraryPath, onDoubleClick, onCon
     [archive.id, onContextMenu],
   );
 
-  const handleDragStart = useCallback(
-    (e: React.DragEvent) => {
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.button !== 0) return; // left click only
       const ids = selectedArchiveIds.has(archive.id)
         ? Array.from(selectedArchiveIds)
         : [archive.id];
-      e.dataTransfer.setData('application/x-archive-ids', JSON.stringify(ids));
-      e.dataTransfer.effectAllowed = 'move';
+      dragState.start(ids);
+      document.body.style.cursor = 'grabbing';
+      document.body.style.userSelect = 'none';
+      const cleanup = () => {
+        dragState.end();
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        document.removeEventListener('mouseup', cleanup);
+      };
+      document.addEventListener('mouseup', cleanup);
     },
     [archive.id, selectedArchiveIds],
   );
@@ -78,11 +88,10 @@ export default function ArchiveCard({ archive, libraryPath, onDoubleClick, onCon
       tabIndex={0}
       role="button"
       aria-label={`${archive.title} - ${archive.rank}星`}
-      draggable
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onKeyDown={handleKeyDown}
-      onDragStart={handleDragStart}
+      onMouseDown={handleMouseDown}
       onContextMenu={handleContextMenu}
       style={{
         background: 'var(--bg-card)',
