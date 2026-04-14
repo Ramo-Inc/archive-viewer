@@ -121,7 +121,7 @@ fn run_export(app: &AppHandle, dest_path: &str) -> Result<(), AppError> {
     // DB を追加 (Deflated)
     let db_options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
     zip_writer
-        .start_file("comicviewer.db", db_options)
+        .start_file("archiveviewer.db", db_options)
         .map_err(|e| AppError::FileIO(format!("ZIP書き込み失敗: {}", e)))?;
     let mut db_file = File::open(&temp_db_path)?;
     io::copy(&mut db_file, &mut zip_writer)?;
@@ -131,7 +131,7 @@ fn run_export(app: &AppHandle, dest_path: &str) -> Result<(), AppError> {
         BackupProgress {
             current: 1,
             total,
-            file_name: "comicviewer.db".to_string(),
+            file_name: "archiveviewer.db".to_string(),
         },
     );
 
@@ -208,7 +208,7 @@ pub fn import_backup(app: AppHandle, zip_path: String, dest_dir: String) -> Resu
         return Err(AppError::Validation("インポート処理中です".to_string()));
     }
 
-    // ZIP を開き comicviewer.db の存在を確認
+    // ZIP を開き archiveviewer.db の存在を確認
     let zip_file = std::fs::File::open(&zip_path)?;
     let mut archive = zip::ZipArchive::new(zip_file)
         .map_err(|e| AppError::Archive(format!("ZIPオープン失敗: {}", e)))?;
@@ -217,12 +217,12 @@ pub fn import_backup(app: AppHandle, zip_path: String, dest_dir: String) -> Resu
         archive
             .by_index(i)
             .ok()
-            .and_then(|f| f.enclosed_name().map(|n| n == std::path::Path::new("comicviewer.db")))
+            .and_then(|f| f.enclosed_name().map(|n| n == std::path::Path::new("archiveviewer.db")))
             .unwrap_or(false)
     });
     if !has_db {
         return Err(AppError::Validation(
-            "バックアップにcomicviewer.dbが含まれていません".to_string(),
+            "バックアップにarchiveviewer.dbが含まれていません".to_string(),
         ));
     }
 
@@ -239,9 +239,9 @@ pub fn import_backup(app: AppHandle, zip_path: String, dest_dir: String) -> Resu
         }
     }
 
-    // dest_dir に既存の comicviewer.db があれば拒否
+    // dest_dir に既存の archiveviewer.db があれば拒否
     let dest = std::path::PathBuf::from(&dest_dir);
-    if dest.join("comicviewer.db").exists() || dest.join("archives").exists() {
+    if dest.join("archiveviewer.db").exists() || dest.join("archives").exists() {
         return Err(AppError::Validation(
             "展開先に既存のライブラリデータがあります。空のフォルダを選択してください".to_string(),
         ));
@@ -250,9 +250,9 @@ pub fn import_backup(app: AppHandle, zip_path: String, dest_dir: String) -> Resu
     // スキーマバージョン検証
     {
         let temp_dir = tempfile::TempDir::new()?;
-        let temp_db = temp_dir.path().join("comicviewer.db");
+        let temp_db = temp_dir.path().join("archiveviewer.db");
         let mut db_entry = archive
-            .by_name("comicviewer.db")
+            .by_name("archiveviewer.db")
             .map_err(|e| AppError::Archive(format!("ZIPエントリ読み取り失敗: {}", e)))?;
         let mut db_data = Vec::new();
         std::io::Read::read_to_end(&mut db_entry, &mut db_data)?;
@@ -369,7 +369,7 @@ fn run_import(
     std::fs::create_dir_all(dest.join("thumbnails"))?;
 
     // Phase 2: config更新 + DB再接続
-    let db_path = dest.join("comicviewer.db");
+    let db_path = dest.join("archiveviewer.db");
     let db_path_str = db_path
         .to_str()
         .ok_or_else(|| AppError::FileIO("無効なDBパス".to_string()))?;
@@ -389,7 +389,7 @@ fn run_import(
         if let Some(old_path) = old_library_path {
             cfg.library_path = Some(old_path.to_string());
             let _ = config::save_config(&cfg);
-            let old_db = std::path::PathBuf::from(old_path).join("comicviewer.db");
+            let old_db = std::path::PathBuf::from(old_path).join("archiveviewer.db");
             if let Some(s) = old_db.to_str() {
                 let _ = db_state.init(s);
             }
@@ -521,7 +521,7 @@ mod tests {
         fs::create_dir_all(&pages_dir).unwrap();
         fs::write(archives_dir.join("comic.cbz"), b"fake zip content").unwrap();
         fs::write(pages_dir.join("page.png"), b"cached page").unwrap();
-        fs::write(lib_dir.join("comicviewer.db"), b"fake db content").unwrap();
+        fs::write(lib_dir.join("archiveviewer.db"), b"fake db content").unwrap();
 
         let mut entries = Vec::new();
         collect_archive_files(&lib_dir.join("archives"), "archives", &mut entries).unwrap();
@@ -537,7 +537,7 @@ mod tests {
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Stored);
 
-        zip_writer.start_file("comicviewer.db", options).unwrap();
+        zip_writer.start_file("archiveviewer.db", options).unwrap();
         zip_writer.write_all(b"fake db content").unwrap();
 
         for (abs_path, rel_path) in &entries {
@@ -554,7 +554,7 @@ mod tests {
             .map(|i| zip_archive.by_index(i).unwrap().name().to_string())
             .collect();
 
-        assert!(names.contains(&"comicviewer.db".to_string()));
+        assert!(names.contains(&"archiveviewer.db".to_string()));
         assert!(names.contains(&"archives/test-id/comic.cbz".to_string()));
         assert!(!names.iter().any(|n| n.contains("pages")));
     }
@@ -574,7 +574,7 @@ mod tests {
             conn.execute_batch("PRAGMA user_version = 2;").unwrap();
             drop(conn);
             let db_data = fs::read(&temp_db).unwrap();
-            zip_writer.start_file("comicviewer.db", options).unwrap();
+            zip_writer.start_file("archiveviewer.db", options).unwrap();
             zip_writer.write_all(&db_data).unwrap();
             let _ = fs::remove_file(&temp_db);
         }
@@ -595,10 +595,10 @@ mod tests {
 
         let has_db = (0..archive.len()).any(|i| {
             archive.by_index(i).ok()
-                .and_then(|f| f.enclosed_name().map(|n| n == std::path::Path::new("comicviewer.db")))
+                .and_then(|f| f.enclosed_name().map(|n| n == std::path::Path::new("archiveviewer.db")))
                 .unwrap_or(false)
         });
-        assert!(!has_db, "ZIP without comicviewer.db should fail validation");
+        assert!(!has_db, "ZIP without archiveviewer.db should fail validation");
     }
 
     #[test]
@@ -611,10 +611,10 @@ mod tests {
 
         let has_db = (0..archive.len()).any(|i| {
             archive.by_index(i).ok()
-                .and_then(|f| f.enclosed_name().map(|n| n == std::path::Path::new("comicviewer.db")))
+                .and_then(|f| f.enclosed_name().map(|n| n == std::path::Path::new("archiveviewer.db")))
                 .unwrap_or(false)
         });
-        assert!(has_db, "ZIP with comicviewer.db should pass validation");
+        assert!(has_db, "ZIP with archiveviewer.db should pass validation");
     }
 
     #[test]
@@ -648,10 +648,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let dest = tmp.path().join("dest");
         fs::create_dir_all(&dest).unwrap();
-        fs::write(dest.join("comicviewer.db"), b"existing").unwrap();
+        fs::write(dest.join("archiveviewer.db"), b"existing").unwrap();
 
-        let has_conflict = dest.join("comicviewer.db").exists() || dest.join("archives").exists();
-        assert!(has_conflict, "dest_dir with existing comicviewer.db should be rejected");
+        let has_conflict = dest.join("archiveviewer.db").exists() || dest.join("archives").exists();
+        assert!(has_conflict, "dest_dir with existing archiveviewer.db should be rejected");
     }
 
     #[test]
@@ -660,7 +660,7 @@ mod tests {
         let dest = tmp.path().join("empty_dest");
         fs::create_dir_all(&dest).unwrap();
 
-        let has_conflict = dest.join("comicviewer.db").exists() || dest.join("archives").exists();
+        let has_conflict = dest.join("archiveviewer.db").exists() || dest.join("archives").exists();
         assert!(!has_conflict, "Empty dest_dir should pass validation");
     }
 

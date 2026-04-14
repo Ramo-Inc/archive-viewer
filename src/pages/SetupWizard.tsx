@@ -56,7 +56,7 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
         background: 'var(--bg-primary)',
       }}
     >
-      <h1 style={{ fontSize: 28, fontWeight: 600 }}>ComicViewer セットアップ</h1>
+      <h1 style={{ fontSize: 28, fontWeight: 600 }}>ArchiveViewer セットアップ</h1>
       <p style={{ color: 'var(--text-secondary)', maxWidth: 420, textAlign: 'center' }}>
         漫画・コミックが保存されているフォルダを選択してください。
         選択したフォルダ配下のアーカイブが自動的にライブラリに登録されます。

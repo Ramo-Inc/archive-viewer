@@ -16,7 +16,7 @@ pub fn init_library(
     std::fs::create_dir_all(&path)?;
 
     // DB初期化
-    let db_path = path.join("comicviewer.db");
+    let db_path = path.join("archiveviewer.db");
     state.init(db_path.to_str().unwrap_or(""))?;
 
     // configに保存

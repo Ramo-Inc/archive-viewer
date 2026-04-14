@@ -56,6 +56,16 @@ pub fn prepare_import(
         )));
     }
 
+    // コピー前にソースファイルを検証 (早期失敗・リソースリーク防止)
+    let src_path_str = file_path.to_str().ok_or_else(|| {
+        AppError::Validation("ファイルパスを文字列に変換できません".to_string())
+    })?;
+    let reader = archive::open_archive(src_path_str)?;
+    let page_count = reader.page_count()? as i32;
+
+    // ソースから最初のページを取得 (サムネイル用)
+    let first_page_data = reader.extract_first_page().ok();
+
     let archive_id = Uuid::new_v4().to_string();
 
     // ライブラリ内にアーカイブディレクトリを作成
@@ -64,25 +74,24 @@ pub fn prepare_import(
 
     // ファイルをコピー
     let dest_path = archive_dir.join(&file_name);
-    fs::copy(file_path, &dest_path)?;
+    fs::copy(file_path, &dest_path).map_err(|e| {
+        let _ = fs::remove_dir_all(&archive_dir);
+        AppError::FileIO(e.to_string())
+    })?;
 
     let file_size = fs::metadata(&dest_path)?.len() as i64;
 
-    // アーカイブを開いてページ数・サムネイル生成
-    let reader = archive::open_archive(dest_path.to_str().unwrap_or(""))?;
-    let page_count = reader.page_count()? as i32;
-
-    // サムネイル生成
-    let thumbnail_path = match reader.extract_first_page() {
-        Ok(first_page_data) => {
+    // サムネイル生成 (ソースから取得済みのデータを使用)
+    let thumbnail_path = match first_page_data {
+        Some(data) => {
             let thumb_dir = library_path.join("thumbnails");
             let thumb_path = thumb_dir.join(format!("{}.jpg", archive_id));
-            match thumbnail::generate_thumbnail(&first_page_data, &thumb_path) {
+            match thumbnail::generate_thumbnail(&data, &thumb_path) {
                 Ok(()) => Some(thumb_path),
                 Err(_) => None, // サムネイル生成失敗は致命的ではない
             }
         }
-        Err(_) => None,
+        None => None,
     };
 
     Ok(PreparedImport {

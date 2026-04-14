@@ -4,7 +4,7 @@ setlocal
 cd /d "%~dp0"
 
 echo ==============================
-echo  ComicViewer Release Build
+echo  ArchiveViewer Release Build
 echo ==============================
 echo.
 
@@ -27,7 +27,7 @@ echo.
 echo ==============================
 echo  Build complete!
 echo ==============================
-echo Output: src-tauri\target\release\comic-viewer.exe
+echo Output: src-tauri\target\release\archive-viewer.exe
 echo Installer: src-tauri\target\release\bundle\
 echo.
 

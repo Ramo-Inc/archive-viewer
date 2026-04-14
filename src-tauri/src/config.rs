@@ -36,11 +36,14 @@ impl Default for AppConfig {
     }
 }
 
-/// %APPDATA%/ComicViewer/config.json のパスを返す
+/// exe と同じディレクトリを返す (config.json を exe 隣に配置)
 pub fn config_dir() -> Result<PathBuf, AppError> {
-    let appdata = std::env::var("APPDATA")
-        .map_err(|_| AppError::FileIO("APPDATA environment variable not found".into()))?;
-    Ok(PathBuf::from(appdata).join("ComicViewer"))
+    let exe_path = std::env::current_exe()
+        .map_err(|e| AppError::FileIO(format!("実行ファイルのパス取得失敗: {}", e)))?;
+    exe_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| AppError::FileIO("実行ファイルのディレクトリ取得失敗".to_string()))
 }
 
 pub fn config_path() -> Result<PathBuf, AppError> {

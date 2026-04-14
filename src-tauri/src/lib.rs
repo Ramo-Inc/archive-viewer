@@ -39,11 +39,18 @@ pub fn run() {
                 window.open_devtools();
             }
 
+            // ウィンドウアイコンを設定 (タスクバーアイコン)
+            if let Some(window) = app.get_webview_window("main") {
+                if let Ok(icon) = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png")) {
+                    let _ = window.set_icon(icon);
+                }
+            }
+
             // config読み込み → ライブラリパスがあればDB初期化 + 整合性チェック
             if let Ok(cfg) = config::load_config() {
                 if let Some(ref lib_path) = cfg.library_path {
                     let db_path =
-                        std::path::PathBuf::from(lib_path).join("comicviewer.db");
+                        std::path::PathBuf::from(lib_path).join("archiveviewer.db");
                     if let Some(db_path_str) = db_path.to_str() {
                         let state: State<'_, DbState> = app.state::<DbState>();
                         let _ = state.init(db_path_str);

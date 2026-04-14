@@ -72,7 +72,7 @@ export default function SettingsModal({ onClose }: Props) {
       const today = new Date().toISOString().slice(0, 10);
       const destPath = await save({
         title: 'バックアップの保存先',
-        defaultPath: `comicviewer-backup-${today}.zip`,
+        defaultPath: `archive-viewer-backup-${today}.zip`,
         filters: [{ name: 'ZIP', extensions: ['zip'] }],
       });
       if (!destPath) return;

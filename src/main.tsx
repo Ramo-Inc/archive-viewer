@@ -3,17 +3,17 @@ import { createRoot } from 'react-dom/client';
 import './styles/global.css';
 import App from './App';
 
-console.log('[ComicViewer] main.tsx loaded');
+console.log('[ArchiveViewer] main.tsx loaded');
 
 const root = document.getElementById('root');
 if (!root) {
-  console.error('[ComicViewer] #root element not found!');
+  console.error('[ArchiveViewer] #root element not found!');
 } else {
-  console.log('[ComicViewer] Mounting React app...');
+  console.log('[ArchiveViewer] Mounting React app...');
   createRoot(root).render(
     <StrictMode>
       <App />
     </StrictMode>,
   );
-  console.log('[ComicViewer] React app mounted');
+  console.log('[ArchiveViewer] React app mounted');
 }

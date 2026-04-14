@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "comic-viewer",
+  "productName": "archive-viewer",
   "version": "0.1.0",
-  "identifier": "com.comicviewer.desktop",
+  "identifier": "com.archiveviewer.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "ComicViewer",
+        "title": "ArchiveViewer",
         "width": 1280,
         "height": 800,
         "resizable": true,

@@ -75,7 +75,7 @@ impl ArchiveReader for RarReader {
     fn extract_page(&self, page_name: &str) -> Result<Vec<u8>, AppError> {
         // HI-6: UUID付き一時ディレクトリで並行アクセス防止
         let temp_id = uuid::Uuid::new_v4().to_string();
-        let temp_dir = std::env::temp_dir().join(format!("comicviewer_rar_{}", temp_id));
+        let temp_dir = std::env::temp_dir().join(format!("archiveviewer_rar_{}", temp_id));
         fs::create_dir_all(&temp_dir)?;
 
         let result = (|| -> Result<Vec<u8>, AppError> {

@@ -25,7 +25,7 @@ impl ZipReader {
         let file = File::open(&self.path)?;
         // CR-5: ZipArchive::newで可変借用
         let archive = ZipArchive::new(file)
-            .map_err(|e| AppError::Archive(format!("ZIPオープン失敗: {}", e)))?;
+            .map_err(|e| AppError::Archive(format!("ZIPオープン失敗 [{}]: {}", self.path, e)))?;
         Ok(archive)
     }
 }

@@ -1,73 +1,109 @@
-# React + TypeScript + Vite
+# ArchiveViewer
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+[English](README.en.md)
 
-Currently, two official plugins are available:
+Windows 向けのデスクトップ漫画・コミックアーカイブビューア。Tauri 2 + React 19 + Rust で構築しています。
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 機能
 
-## React Compiler
+- **アーカイブ対応** — ZIP (`.cbz`, `.zip`) および RAR (`.cbr`, `.rar`) ファイルを直接読み込み
+- **ライブラリ管理** — 階層フォルダ・タグ・スマートフォルダ（フィルター条件による動的コレクション）で整理
+- **高品質レンダリング** — WebGL2 エリア平均法シェーダーによる高精細ダウンスケーリング（WPF の `BitmapScalingMode.Fant` 相当）
+- **見開き表示** — 横長ページを自動検出してページ順を維持した左右並べ表示
+- **読書進捗の保存** — 各アーカイブの読書位置を自動保存
+- **バックアップ／復元** — ライブラリ全体（アーカイブ＋データベース）を ZIP にエクスポート・別PCへインポート可能
+- **消失ファイル検出** — 起動時に移動・削除されたファイルを自動検出してフラグ管理（メタデータは削除しない）
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## 技術スタック
 
-## Expanding the ESLint configuration
+| レイヤー | 技術 |
+|---|---|
+| UI | React 19, TypeScript, Zustand, react-virtuoso |
+| デスクトップ | Tauri 2（Rust バックエンド + WebView フロントエンド） |
+| データベース | SQLite（rusqlite、WAL モード） |
+| レンダリング | WebGL2 フラグメントシェーダー（エリア平均法） |
+| アーカイブ | zip 2, unrar 0.5 |
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## 動作環境
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- Windows 10/11（64-bit）
+- WebView2 ランタイム（Windows 11 は標準搭載、Windows 10 は別途ダウンロード）
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## ソースからビルドする
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### 必要なツール
+
+- [Node.js](https://nodejs.org/) 18 以上
+- [Rust](https://rustup.rs/)（stable、1.77.2 以上）
+- [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)（Windows での Rust ビルドに必要）
+
+### 開発用起動
+
+```bash
+# フロントエンド依存パッケージをインストール
+npm install
+
+# ホットリロード付きでデスクトップアプリを起動
+npx tauri dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### リリースビルド
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+```bash
+# リリースビルド（npm ci + tauri build を実行）
+.\build.bat
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# または手動で
+npm ci
+npx tauri build
 ```
+
+ビルド成果物は `src-tauri/target/release/bundle/` に出力されます。
+
+## テストの実行
+
+```bash
+# Rust ユニット／統合テスト
+cd src-tauri && cargo test
+
+# TypeScript 型チェック
+npx tsc --noEmit
+
+# Lint
+npm run lint
+```
+
+## プロジェクト構成
+
+```
+src/                    # React フロントエンド
+  pages/                # SetupWizard, LibraryPage, ViewerPage
+  components/
+    common/             # 共通 UI コンポーネント
+    library/            # グリッド・サイドバー・詳細パネル
+    viewer/             # リーダー・WebGL ページレンダラー・見開きレイアウト
+  stores/               # Zustand ストア（library, viewer, toast）
+  hooks/                # useTauriCommand, useKeyboardShortcuts, useDragDrop
+
+src-tauri/src/          # Rust バックエンド
+  commands/             # Tauri IPC ハンドラー（library, archive, viewer, drag_drop, settings）
+  db/                   # SQLite：マイグレーション・クエリ・モデル
+  library/              # インポートパイプライン・起動時整合性チェック
+  archive/              # ZIP/RAR 展開（共通トレイト＋フォーマット別実装）
+  imaging/              # サムネイル生成
+  config.rs             # アプリ設定（exe と同じディレクトリの config.json）
+```
+
+## データ・設定ファイルの場所
+
+| パス | 内容 |
+|---|---|
+| `<exeのディレクトリ>\config.json` | アプリ設定（ライブラリパス・ウィンドウ状態） |
+| `<ライブラリ>/archiveviewer.db` | SQLite データベース |
+| `<ライブラリ>/archives/<id>/` | アーカイブファイル本体 |
+| `<ライブラリ>/archives/<id>/pages/` | ページキャッシュ（バージョン変更時に自動無効化） |
+| `<ライブラリ>/thumbnails/` | 表紙サムネイル（JPEG） |
+
+## ライセンス
+
+MIT
