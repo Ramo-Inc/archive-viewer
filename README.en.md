@@ -1,8 +1,12 @@
-﻿# ArchiveViewer
+﻿<h1 align="center">ArchiveViewer</h1>
 
-[日本語](README.md)
+<p align="center">
+  Organize your comic archives. Read them beautifully.
+</p>
 
-A desktop manga/comic archive viewer for Windows, built with Tauri 2 + React 19 + Rust.
+<p align="center">
+  <a href="https://github.com/Ramo-Inc/archive-viewer/releases/latest">Download</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="README.md">日本語</a>
+</p>
 
 <br>
 
@@ -19,103 +23,104 @@ A desktop manga/comic archive viewer for Windows, built with Tauri 2 + React 19 
 
 ## Features
 
-- **Archive support** — ZIP (`.cbz`, `.zip`) and RAR (`.cbr`, `.rar`) files
-- **Library management** — Organize comics with hierarchical folders, tags, and smart folders (dynamic filter-based collections)
-- **High-quality rendering** — WebGL2 area-averaging shader for crisp downscaling (equivalent to WPF's `BitmapScalingMode.Fant`)
-- **Spread view** — Automatic detection of landscape (spread) pages; side-by-side display with correct page order
-- **Reading progress** — Per-archive read position saved automatically
-- **Backup & restore** — Export your entire library (archives + database) to a ZIP, and import it on any machine
-- **Missing file detection** — Startup integrity check flags moved/deleted files without removing metadata
+**Read ZIP / RAR directly** — Drag & drop `.cbz` `.zip` `.cbr` `.rar` files
 
-## Tech Stack
+**Organize with folders, tags & smart folders** — Build a library that fits your reading style
+
+**High-quality rendering** — WebGL2 area-averaging shader for moire-free downscaling
+
+**Spread view** — Auto-detects landscape pages and displays them side by side
+
+**Auto-save reading position** — Pick up right where you left off
+
+**Backup / restore** — Export your entire library as a single ZIP
+
+## Requirements
+
+Windows 10 / 11 (64-bit)
+
+<br>
+
+<details>
+<summary><b>Tech Stack</b></summary>
+
+<br>
 
 | Layer | Technology |
 |---|---|
 | UI | React 19, TypeScript, Zustand, react-virtuoso |
-| Desktop | Tauri 2 (Rust backend, WebView frontend) |
+| Desktop | Tauri 2 (Rust + WebView) |
 | Database | SQLite via rusqlite (WAL mode) |
-| Rendering | WebGL2 fragment shader (area-averaging) |
-| Archives | zip 2, unrar 0.5 |
+| Rendering | WebGL2 fragment shader |
+| Archives | zip, unrar |
 
-## Requirements
+</details>
 
-- Windows 10/11 (64-bit)
-- WebView2 runtime (bundled with Windows 11; downloadable for Windows 10)
+<details>
+<summary><b>Building from Source</b></summary>
 
-## Building from Source
+<br>
 
-### Prerequisites
-
-- [Node.js](https://nodejs.org/) 18+
-- [Rust](https://rustup.rs/) (stable, 1.77.2+)
-- [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) (for Rust on Windows)
-
-### Development
+**Prerequisites:** [Node.js](https://nodejs.org/) 18+, [Rust](https://rustup.rs/) 1.77.2+, [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
 
 ```bash
-# Install frontend dependencies
 npm install
-
-# Run the full desktop app with hot reload
-npx tauri dev
+npx tauri dev       # Development (hot reload)
+.\build.bat         # Release build
 ```
 
-### Production Build
+</details>
+
+<details>
+<summary><b>Tests</b></summary>
+
+<br>
 
 ```bash
-# Release build (runs npm ci + tauri build)
-.\build.bat
-
-# Or manually
-npm ci
-npx tauri build
+cd src-tauri && cargo test   # Rust tests
+npx tsc --noEmit             # Type check
+npm run lint                 # Lint
 ```
 
-The installer and executable will be in `src-tauri/target/release/bundle/`.
+</details>
 
-## Running Tests
+<details>
+<summary><b>Project Structure</b></summary>
 
-```bash
-# Rust unit/integration tests
-cd src-tauri && cargo test
-
-# TypeScript type check
-npx tsc --noEmit
-
-# Lint
-npm run lint
-```
-
-## Project Structure
+<br>
 
 ```
 src/                    # React frontend
   pages/                # SetupWizard, LibraryPage, ViewerPage
-  components/
-    common/             # Shared UI primitives
-    library/            # Grid, sidebar, detail panel
-    viewer/             # Reader, WebGL page renderer, spread layout
-  stores/               # Zustand stores (library, viewer, toast)
-  hooks/                # useTauriCommand, useKeyboardShortcuts, useDragDrop
+  components/           # UI components
+  stores/               # Zustand stores
+  hooks/                # Custom hooks
 
 src-tauri/src/          # Rust backend
-  commands/             # Tauri IPC handlers (library, archive, viewer, drag_drop, settings)
-  db/                   # SQLite: migrations, queries, models
-  library/              # Import pipeline, startup integrity check
-  archive/              # ZIP/RAR extraction (common trait + per-format impl)
+  commands/             # Tauri IPC handlers
+  db/                   # SQLite (migrations, queries, models)
+  library/              # Import pipeline, integrity check
+  archive/              # ZIP/RAR extraction
   imaging/              # Thumbnail generation
-  config.rs             # App config (exe dir/config.json)
 ```
 
-## Data & Config Locations
+</details>
+
+<details>
+<summary><b>Data Locations</b></summary>
+
+<br>
 
 | Path | Contents |
 |---|---|
-| `<exe_dir>\config.json` | App settings (library path, window state) |
-| `<library>/archiveviewer.db` | SQLite database |
-| `<library>/archives/<id>/` | Original archive files |
-| `<library>/archives/<id>/pages/` | Page cache (auto-invalidated on version change) |
-| `<library>/thumbnails/` | Cover thumbnails (JPEG) |
+| `<exe>\config.json` | App settings |
+| `<library>/archiveviewer.db` | Database |
+| `<library>/archives/` | Archive files |
+| `<library>/thumbnails/` | Thumbnails |
+
+</details>
+
+<br>
 
 ## License
 
