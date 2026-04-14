@@ -1,0 +1,11 @@
+node_modules/
+target/
+dist/
+.superpowers/
+.claude/
+docs/
+CLAUDE.md
+
+# Platform-specific icons (Windows desktop only)
+src-tauri/icons/android/
+src-tauri/icons/ios/
