@@ -1,8 +1,6 @@
 use crate::error::AppError;
 use rusqlite::Connection;
 
-const CURRENT_VERSION: i32 = 2;
-
 pub fn run(conn: &Connection) -> Result<(), AppError> {
     let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
 
@@ -133,7 +131,7 @@ mod tests {
         let version: i32 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, CURRENT_VERSION);
+        assert_eq!(version, 2);
     }
 
     #[test]
