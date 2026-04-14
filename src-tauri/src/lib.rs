@@ -6,13 +6,19 @@ pub mod error;
 pub mod imaging;
 pub mod library;
 
+use commands::drag_drop::ImportState;
 use db::DbState;
+use std::sync::atomic::AtomicBool;
 use tauri::{Manager, State};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(DbState::empty())
+        .manage(ImportState {
+            cancel: AtomicBool::new(false),
+            running: AtomicBool::new(false),
+        })
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -73,6 +79,7 @@ pub fn run() {
             // drag_drop commands
             commands::drag_drop::import_dropped_files,
             commands::drag_drop::handle_internal_drag,
+            commands::drag_drop::cancel_import,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

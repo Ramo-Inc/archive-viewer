@@ -5,7 +5,14 @@ use crate::db::DbState;
 use crate::error::AppError;
 use crate::library::import;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::State;
+
+/// インポート状態管理 (Tauri managed state)
+pub struct ImportState {
+    pub cancel: AtomicBool,
+    pub running: AtomicBool,
+}
 
 /// ドロップされたファイルをインポート
 #[tauri::command]
@@ -59,5 +66,12 @@ pub fn handle_internal_drag(
         }
     }
 
+    Ok(())
+}
+
+/// インポートをキャンセル
+#[tauri::command]
+pub fn cancel_import(state: State<'_, ImportState>) -> Result<(), crate::error::AppError> {
+    state.cancel.store(true, Ordering::Relaxed);
     Ok(())
 }
