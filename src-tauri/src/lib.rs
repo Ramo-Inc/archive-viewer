@@ -86,6 +86,7 @@ pub fn run() {
             commands::drag_drop::cancel_import,
             // settings commands
             commands::settings::export_backup,
+            commands::settings::import_backup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
