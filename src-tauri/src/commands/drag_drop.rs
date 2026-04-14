@@ -45,6 +45,11 @@ pub fn import_dropped_files(
         return Err(AppError::Validation("インポート処理中です".to_string()));
     }
 
+    let backup_state = app.state::<crate::commands::settings::BackupState>();
+    if backup_state.running.load(Ordering::Relaxed) {
+        return Err(AppError::Validation("バックアップ処理中です".to_string()));
+    }
+
     // フラグをリセット・起動
     import_state.cancel.store(false, Ordering::Relaxed);
     import_state.running.store(true, Ordering::Relaxed);

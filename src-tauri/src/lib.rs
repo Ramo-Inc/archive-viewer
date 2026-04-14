@@ -7,6 +7,7 @@ pub mod imaging;
 pub mod library;
 
 use commands::drag_drop::ImportState;
+use commands::settings::BackupState;
 use db::DbState;
 use std::sync::atomic::AtomicBool;
 use tauri::{Manager, State};
@@ -17,6 +18,9 @@ pub fn run() {
         .manage(DbState::empty())
         .manage(ImportState {
             cancel: AtomicBool::new(false),
+            running: AtomicBool::new(false),
+        })
+        .manage(BackupState {
             running: AtomicBool::new(false),
         })
         .plugin(tauri_plugin_dialog::init())
@@ -80,6 +84,8 @@ pub fn run() {
             commands::drag_drop::import_dropped_files,
             commands::drag_drop::handle_internal_drag,
             commands::drag_drop::cancel_import,
+            // settings commands
+            commands::settings::export_backup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
