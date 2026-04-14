@@ -7,6 +7,7 @@ import ArchiveGrid from '../components/library/ArchiveGrid';
 import DetailPanel from '../components/library/DetailPanel';
 import DragDropZone from '../components/common/DragDropZone';
 import ToastContainer from '../components/common/Toast';
+import ImportProgress from '../components/common/ImportProgress';
 import { useDragDrop } from '../hooks/useDragDrop';
 
 /**
@@ -47,6 +48,7 @@ export default function LibraryPage() {
         <ArchiveGrid onOpenViewer={handleOpenViewer} />
         <DetailPanel onOpenViewer={handleOpenViewer} />
       </div>
+      <ImportProgress />
     </div>
   );
 }
