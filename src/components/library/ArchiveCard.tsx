@@ -34,7 +34,7 @@ export default function ArchiveCard({ archive, libraryPath, onDoubleClick, onCon
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
-      selectArchive(archive.id, e.ctrlKey || e.metaKey);
+      selectArchive(archive.id, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey });
     },
     [archive.id, selectArchive],
   );
@@ -45,7 +45,7 @@ export default function ArchiveCard({ archive, libraryPath, onDoubleClick, onCon
         if (onDoubleClick) onDoubleClick(archive.id);
       } else if (e.key === ' ') {
         e.preventDefault();
-        selectArchive(archive.id, e.ctrlKey || e.metaKey);
+        selectArchive(archive.id, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey });
       }
     },
     [archive.id, selectArchive, onDoubleClick],
@@ -58,9 +58,12 @@ export default function ArchiveCard({ archive, libraryPath, onDoubleClick, onCon
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
+      if (!selectedArchiveIds.has(archive.id)) {
+        selectArchive(archive.id);
+      }
       if (onContextMenu) onContextMenu(e, archive.id);
     },
-    [archive.id, onContextMenu],
+    [archive.id, selectedArchiveIds, selectArchive, onContextMenu],
   );
 
   const handleMouseDown = useCallback(
@@ -180,10 +183,22 @@ export default function ArchiveCard({ archive, libraryPath, onDoubleClick, onCon
             const folderId = targetEl.getAttribute('data-folder-id');
             if (folderId) {
               dragState.drop(folderId);
-              return;
+            } else {
+              dragState.end();
             }
+          } else {
+            dragState.end();
           }
-          dragState.end();
+          // Suppress the next click event via capture phase.
+          // Self-removes after the click fires or after the current
+          // event loop tick (whichever comes first).
+          const suppress = (ce: MouseEvent) => {
+            ce.stopPropagation();
+            ce.preventDefault();
+            document.removeEventListener('click', suppress, true);
+          };
+          document.addEventListener('click', suppress, true);
+          setTimeout(() => document.removeEventListener('click', suppress, true), 0);
         }
       };
 
