@@ -4,7 +4,7 @@
 
 **Goal:** Show a progress bar with file count and cancel button during drag-and-drop import.
 
-**Architecture:** Backend spawns a background thread for import, emitting Tauri events per file. Frontend listens to events via a Zustand store and renders a fixed bottom bar. Cancel uses an `AtomicBool` flag checked each iteration.
+**Architecture:** Backend spawns a background thread for import, emitting Tauri events per file. Frontend listens to events via a Zustand store and renders a bottom bar in the flex layout. Cancel uses an `AtomicBool` flag checked each iteration. A `running` guard prevents concurrent imports.
 
 **Tech Stack:** Tauri 2 events (`AppHandle::emit`), `std::sync::atomic::AtomicBool`, Zustand, React
 
@@ -16,7 +16,7 @@
 |------|--------|----------------|
 | `src-tauri/src/commands/drag_drop.rs` | Modify | Async import with event emission + cancel check |
 | `src-tauri/src/lib.rs` | Modify | Register `ImportCancelFlag` state + `cancel_import` command |
-| `src/stores/importStore.ts` | Create | Import progress state (active, current, total, fileName) |
+| `src/stores/importStore.ts` | Create | Import progress state (active, current, total) |
 | `src/components/common/ImportProgress.tsx` | Create | Bottom bar UI with progress + cancel |
 | `src/hooks/useDragDrop.ts` | Modify | Listen to import events, remove blocking await |
 | `src/pages/LibraryPage.tsx` | Modify | Render `ImportProgress` |
@@ -38,15 +38,18 @@ At the top of `src-tauri/src/commands/drag_drop.rs`, add the new imports and str
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::State;
 
-/// キャンセルフラグ (Tauri managed state)
-pub struct ImportCancelFlag(pub AtomicBool);
+/// インポート状態管理 (Tauri managed state)
+pub struct ImportState {
+    pub cancel: AtomicBool,
+    pub running: AtomicBool,
+}
 
 // ... existing code ...
 
 /// インポートをキャンセル
 #[tauri::command]
-pub fn cancel_import(flag: State<'_, ImportCancelFlag>) -> Result<(), crate::error::AppError> {
-    flag.0.store(true, Ordering::Relaxed);
+pub fn cancel_import(state: State<'_, ImportState>) -> Result<(), crate::error::AppError> {
+    state.cancel.store(true, Ordering::Relaxed);
     Ok(())
 }
 ```
@@ -57,11 +60,14 @@ In `src-tauri/src/lib.rs`, add the import and registration:
 
 ```rust
 // Add import at top:
-use commands::drag_drop::ImportCancelFlag;
+use commands::drag_drop::ImportState;
 use std::sync::atomic::AtomicBool;
 
 // In run(), add .manage() call after existing .manage(DbState::empty()):
-.manage(ImportCancelFlag(AtomicBool::new(false)))
+.manage(ImportState {
+    cancel: AtomicBool::new(false),
+    running: AtomicBool::new(false),
+})
 
 // In invoke_handler, add after existing drag_drop commands:
 commands::drag_drop::cancel_import,
@@ -132,8 +138,15 @@ pub fn import_dropped_files(
 ) -> Result<(), AppError> {
     let library_path = config::get_library_root()?;
 
-    // キャンセルフラグをリセット
-    app.state::<ImportCancelFlag>().0.store(false, Ordering::Relaxed);
+    // 既にインポート中なら拒否
+    let import_state = app.state::<ImportState>();
+    if import_state.running.load(Ordering::Relaxed) {
+        return Err(AppError::Validation("インポート処理中です".to_string()));
+    }
+
+    // フラグをリセット・起動
+    import_state.cancel.store(false, Ordering::Relaxed);
+    import_state.running.store(true, Ordering::Relaxed);
 
     std::thread::spawn(move || {
         let paths: Vec<PathBuf> = file_paths.iter().map(PathBuf::from).collect();
@@ -144,7 +157,7 @@ pub fn import_dropped_files(
 
         for (i, file_path) in paths.iter().enumerate() {
             // キャンセルチェック
-            if app.state::<ImportCancelFlag>().0.load(Ordering::Relaxed) {
+            if app.state::<ImportState>().cancel.load(Ordering::Relaxed) {
                 cancelled = true;
                 break;
             }
@@ -158,7 +171,7 @@ pub fn import_dropped_files(
             let _ = app.emit("import-progress", ImportProgress {
                 current: i + 1,
                 total,
-                file_name,
+                file_name: file_name.clone(),
             });
 
             // ファイルをインポート (エラーは記録して続行)
@@ -176,6 +189,9 @@ pub fn import_dropped_files(
                 Err(e) => errors.push(format!("{}: {}", file_name, e)),
             }
         }
+
+        // runningフラグをリセット
+        app.state::<ImportState>().running.store(false, Ordering::Relaxed);
 
         // 完了イベント送信
         let _ = app.emit("import-complete", ImportComplete {
@@ -225,26 +241,24 @@ Create `src/stores/importStore.ts`:
 ```typescript
 import { create } from 'zustand';
 
-interface ImportState {
+interface ImportStoreState {
   active: boolean;
   current: number;
   total: number;
-  fileName: string;
-  setProgress: (current: number, total: number, fileName: string) => void;
+  setProgress: (current: number, total: number) => void;
   reset: () => void;
 }
 
-export const useImportStore = create<ImportState>((set) => ({
+export const useImportStore = create<ImportStoreState>((set) => ({
   active: false,
   current: 0,
   total: 0,
-  fileName: '',
 
-  setProgress: (current, total, fileName) =>
-    set({ active: true, current, total, fileName }),
+  setProgress: (current, total) =>
+    set({ active: true, current, total }),
 
   reset: () =>
-    set({ active: false, current: 0, total: 0, fileName: '' }),
+    set({ active: false, current: 0, total: 0 }),
 }));
 ```
 
@@ -291,18 +305,14 @@ export default function ImportProgress() {
   return (
     <div
       style={{
-        position: 'fixed',
-        bottom: 0,
-        left: 0,
-        right: 0,
         height: 48,
+        flexShrink: 0,
         background: 'var(--bg-secondary)',
         borderTop: '1px solid var(--border-color)',
         display: 'flex',
         alignItems: 'center',
         padding: '0 16px',
         gap: 12,
-        zIndex: 9000,
       }}
     >
       {/* Spinner */}
@@ -435,8 +445,8 @@ export function useDragDrop() {
       listen<{ current: number; total: number; file_name: string }>(
         'import-progress',
         (event) => {
-          const { current, total, file_name } = event.payload;
-          useImportStore.getState().setProgress(current, total, file_name);
+          const { current, total } = event.payload;
+          useImportStore.getState().setProgress(current, total);
         },
       ),
 
@@ -448,7 +458,9 @@ export function useDragDrop() {
           useImportStore.getState().reset();
 
           const addToast = useToastStore.getState().addToast;
-          if (cancelled) {
+          if (cancelled && imported === 0) {
+            addToast('インポートをキャンセルしました', 'info');
+          } else if (cancelled) {
             addToast(`${imported}件インポート済み（キャンセル）`, 'info');
           } else if (errors.length === 0) {
             addToast(`${imported}件のファイルをインポートしました`, 'success');
@@ -477,6 +489,12 @@ async function handleDrop(payload: {
   const { paths, position } = payload;
   const addToast = useToastStore.getState().addToast;
 
+  // インポート中なら拒否
+  if (useImportStore.getState().active) {
+    addToast('インポート処理中です。完了後に再度お試しください。', 'info');
+    return;
+  }
+
   const archivePaths = paths.filter(isSupportedFile);
 
   if (archivePaths.length === 0) {
@@ -498,6 +516,9 @@ async function handleDrop(payload: {
   }
 
   try {
+    // プログレスバーを即座に表示 (バックエンドからの最初のイベント前)
+    useImportStore.getState().setProgress(0, archivePaths.length);
+
     // バックエンドはスレッドをspawnして即座にOKを返す
     // 進捗はimport-progress/import-completeイベントで受信
     await tauriInvoke('import_dropped_files', {
@@ -505,6 +526,7 @@ async function handleDrop(payload: {
       folderId,
     });
   } catch (e) {
+    useImportStore.getState().reset();
     addToast(`インポート開始に失敗しました: ${String(e)}`, 'error');
   }
 }
@@ -538,20 +560,20 @@ Add import at top:
 import ImportProgress from '../components/common/ImportProgress';
 ```
 
-Add `<ImportProgress />` inside the return JSX, right after `<ToastContainer />`:
+Add `<ImportProgress />` at the **bottom** of the flex column (after the content area, before closing `</div>`). This ensures the progress bar appears below the content and the content area shrinks naturally:
 
 ```tsx
 return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <DragDropZone />
       <ToastContainer />
-      <ImportProgress />
       <TopBar />
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         <Sidebar />
         <ArchiveGrid onOpenViewer={handleOpenViewer} />
         <DetailPanel onOpenViewer={handleOpenViewer} />
       </div>
+      <ImportProgress />
     </div>
   );
 ```
@@ -610,7 +632,14 @@ Run: `npx tauri dev`
 5. Verify: toast shows "N件インポート済み（キャンセル）"
 6. Verify: already-imported files are in the grid, remaining files are not
 
-- [ ] **Step 7: Commit final state**
+- [ ] **Step 7: Manual test — concurrent import guard**
+
+1. Drag 5+ files onto the app window
+2. While import is running, drag more files
+3. Verify: toast shows "インポート処理中です。完了後に再度お試しください。"
+4. Verify: first import continues normally
+
+- [ ] **Step 8: Commit final state**
 
 ```bash
 git add -A

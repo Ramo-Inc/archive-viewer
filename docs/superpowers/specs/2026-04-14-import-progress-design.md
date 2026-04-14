@@ -31,10 +31,13 @@ The current `import_dropped_files` command blocks synchronously until all files 
 ### New managed state: `ImportCancelFlag`
 
 ```rust
-pub struct ImportCancelFlag(pub Arc<AtomicBool>);
+pub struct ImportCancelFlag {
+    pub cancel: AtomicBool,
+    pub running: AtomicBool,
+}
 ```
 
-Registered in `lib.rs` alongside `DbState`. Shared between `import_dropped_files` and `cancel_import`.
+Registered in `lib.rs` alongside `DbState`. `cancel` is set by `cancel_import`, checked each iteration. `running` prevents concurrent imports — `import_dropped_files` returns an error if already `true`.
 
 ### Modified command: `import_dropped_files`
 
@@ -53,7 +56,7 @@ Registered in `lib.rs` alongside `DbState`. Shared between `import_dropped_files
 ```rust
 #[tauri::command]
 pub fn cancel_import(flag: State<'_, ImportCancelFlag>) -> Result<(), AppError> {
-    flag.0.store(true, Ordering::Relaxed);
+    flag.cancel.store(true, Ordering::Relaxed);
     Ok(())
 }
 ```
@@ -90,8 +93,7 @@ interface ImportState {
   active: boolean;
   current: number;
   total: number;
-  fileName: string;
-  setProgress: (current: number, total: number, fileName: string) => void;
+  setProgress: (current: number, total: number) => void;
   reset: () => void;
 }
 ```
@@ -100,7 +102,7 @@ Zustand store, same pattern as `toastStore`. Updated by event listeners, read by
 
 ### New component: `ImportProgress.tsx`
 
-Fixed bar at the bottom of the screen (48px height). Rendered in `LibraryPage` when `importStore.active` is true.
+Bar at the bottom of the flex layout (48px height, `flexShrink: 0`). Part of the normal document flow — not `position: fixed` — so the content area shrinks naturally when the bar is visible. Rendered in `LibraryPage` when `importStore.active` is true.
 
 Layout:
 ```
@@ -120,7 +122,9 @@ Layout:
 - Add event listeners for `import-progress` and `import-complete`:
   - `import-progress`: update `importStore`
   - `import-complete`: reset `importStore`, show summary toast, call `fetchArchives()`
-- The `invoke` call now returns immediately (backend spawns thread), so no `await` blocking.
+- The backend spawns a thread and returns `Ok(())` immediately.
+- Guard: if `importStore.active` is true, reject the drop with a toast (prevent concurrent imports).
+- Show progress bar immediately on drop (before first backend event arrives).
 
 ### Toast messages
 
@@ -128,7 +132,8 @@ Layout:
 |----------|---------|
 | All succeeded | `10件のファイルをインポートしました` |
 | Partial success | `8/10件インポート完了（2件失敗）` |
-| Cancelled | `3件インポート済み（キャンセル）` |
+| Cancelled (some imported) | `3件インポート済み（キャンセル）` |
+| Cancelled (none imported) | `インポートをキャンセルしました` |
 | All failed | `インポートに失敗しました` |
 
 ## Files to create or modify
@@ -136,7 +141,7 @@ Layout:
 | File | Action |
 |------|--------|
 | `src-tauri/src/commands/drag_drop.rs` | Modify: async import with emit + cancel check |
-| `src-tauri/src/library/import.rs` | Modify: `import_files` returns partial results instead of failing on first error |
+| `src-tauri/src/library/import.rs` | No change: `import_dropped_files` calls `prepare_import`/`commit_import` directly with its own loop. `import_files` is kept as-is for the file-picker path (`import_archives`). |
 | `src-tauri/src/lib.rs` | Modify: register `ImportCancelFlag` state and `cancel_import` command |
 | `src/stores/importStore.ts` | Create: progress state |
 | `src/components/common/ImportProgress.tsx` | Create: progress bar UI |
