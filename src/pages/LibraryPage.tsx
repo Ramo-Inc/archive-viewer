@@ -19,10 +19,28 @@ export default function LibraryPage() {
   const fetchFolders = useLibraryStore((s) => s.fetchFolders);
   const fetchTags = useLibraryStore((s) => s.fetchTags);
   const fetchSmartFolders = useLibraryStore((s) => s.fetchSmartFolders);
+  const selectAll = useLibraryStore((s) => s.selectAll);
+  const clearSelection = useLibraryStore((s) => s.clearSelection);
 
   const navigate = useNavigate();
 
   useDragDrop();
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+        e.preventDefault();
+        selectAll();
+      } else if (e.key === 'Escape') {
+        clearSelection();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectAll, clearSelection]);
 
   useEffect(() => {
     fetchArchives();
